@@ -1,0 +1,6 @@
+[target]
+path = github.com/jim3ma/gota
+
+[deps]
+github.com/Sirupsen/logrus = tag:v0.11.0
+
