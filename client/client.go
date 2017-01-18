@@ -60,6 +60,11 @@ func (c *ConnManager) handleConn() {
 	}
 }
 
+// send Magic number to server, than server will create a new connection
+//func (c *ConnManager) createConnOnServer(cid uint16){
+//	c.sendChannel <-
+//}
+
 // receive from receiveChannel and forward to special receive channel according the connection ID
 func (c *ConnManager) receive() {
 	for d := range c.receiveChannel {
@@ -90,6 +95,22 @@ type ConnHandler struct {
 }
 
 func (ch *ConnHandler) start() {
+	// send Magic number to server, than server will create a peer connection
+	req := dataFrame{
+		ConnId: ch.cid,
+		Length: 0,
+		SeqNum: uint32(TMCreateConnSeq),
+	}
+	log.Debugf("Try to create a peer connection on server, connection id: %d", ch.cid)
+	ch.sendChannel <- req
+
+	// wait for server response
+	res := <- ch.receiveChannel
+	if res.SeqNum != TMCreateConnOKSeq {
+		log.Error("Create a peer connection failed, close client connection")
+		ch.connCloseChannel <- ch.cid
+	}
+	log.Debugf("Created a peer connection on server, connection id: %d", ch.cid)
 	go ch.send()
 	go ch.receive()
 }
@@ -106,16 +127,16 @@ func (ch *ConnHandler) send() {
 	seq = 1
 	for {
 		data := make([]byte, MaxDataLength)
-		_, err := ch.conn.Read(data)
+		n, err := ch.conn.Read(data)
 		if err != nil && err != io.EOF {
 			panic(err)
 		}
-		if len(data) > 0 {
+		if n > 0 {
 			df := dataFrame{
 				ConnId: ch.cid,
 				SeqNum: seq,
-				Length: uint16(len(data)),
-				data:   data,
+				Length: uint16(n),
+				data:   data[:n],
 			}
 			seq += 1
 			ch.sendChannel <- df
@@ -308,14 +329,14 @@ func (tw *TunnelWorker) send(done chan<- int, conn *net.TCPConn) {
 			}
 		case <-tw.cancelChannel:
 			log.Infof("Shutdown Worker: %v", tw)
-			_, err := conn.Write([]byte(TMCloseConnString))
+			_, err := conn.Write(TMCloseTunnelBytes)
 			if err != nil {
 				log.Fatalf("Send Close Signal failed duo to: %s", err)
 			}
 			//tw.cancelFlag = -1
 			return
 		case <-tw.heartbeatChan:
-			_, err := conn.Write([]byte(TMHeartBeatString))
+			_, err := conn.Write(TMHeartBeatBytes)
 			if err != nil {
 				log.Fatalf("HeartBeat failed duo to: %s", err)
 				//tw.cancelFlag = -1
@@ -347,14 +368,23 @@ func (tw *TunnelWorker) receive(done chan<- int, conn *net.TCPConn) {
 		}
 
 		df := unWrapDataFrame(header)
-		if df.Length == 0 && df.ConnId == 0 {
-			if df.SeqNum == TMHeartBeatSeq {
+		if df.Length == 0 {
+			switch df.SeqNum {
+			case TMHeartBeatSeq:
 				log.Debug("Received HeartBeat Signal")
 				continue
-			} else if df.SeqNum == TMCloseConnSeq {
-				log.Debug("Received Close Connection Signal")
+			case TMCloseConnSeq:
+				log.Debug("Received close connection signal")
+				// TODO close connection
+			case TMCreateConnSeq:
+				log.Debug("Received create connection signal")
+				log.Error("Create Connection Signal only used in server")
+			case TMCloseTunnelSeq:
+				log.Info("Receive close tunnel signal")
+				// TODO close tunnel
+			default:
+				log.Errorf("Unkownn Signal: %d", df.SeqNum)
 			}
-			log.Errorf("Unkownn Signal: %d", df.SeqNum)
 		}
 
 		data := make([]byte, MaxDataLength)
@@ -362,7 +392,7 @@ func (tw *TunnelWorker) receive(done chan<- int, conn *net.TCPConn) {
 		if (err != nil && err != io.EOF) || n != int(df.Length) {
 			panic(err)
 		}
-		df.data = data
+		df.data = data[:n]
 		tw.s2cChannel <- df
 
 		if tw.cancelFlag == -1 || err == io.EOF {
@@ -384,10 +414,45 @@ const MaxConnID = 65535
 
 // Connection Manage HeartBeat Time
 const TMHeartBeatSecond = 15
-const TMHeartBeatString = "00000000"
-const TMHeartBeatSeq = 0
-const TMCloseConnString = "00000001"
-const TMCloseConnSeq = 1
+
+// Magic data frame
+// when length == 0 the data frame is used for control the tunnels and connections
+//const TMHeartBeatString = "00000000"
+//const TMHeartBeatSeq = 0
+
+//const TMCloseConnString = "00000001"
+//const TMCloseConnSeq = 1
+
+//const TMCreateConnString = "00000002"
+//const TMCreateConnSeq = 2
+
+//const TMCloseTunnelString = "00000003"
+//const TMCloseTunnelSeq = 3
+
+const (
+	TMHeartBeatSeq = iota
+	TMCreateConnSeq
+	TMCreateConnOKSeq
+	TMCloseConnSeq
+	TMCloseConnOKSeq
+	TMCloseTunnelSeq
+)
+
+var TMHeartBeatBytes []byte
+var TMCloseTunnelBytes []byte
+
+func init(){
+	TMHeartBeatBytes = wrapDataFrame(dataFrame{
+		ConnId: uint16(0),
+		Length: uint16(0),
+		SeqNum: uint32(TMHeartBeatSeq),
+	})
+	TMCloseTunnelBytes = wrapDataFrame(dataFrame{
+		ConnId: uint16(0),
+		Length: uint16(0),
+		SeqNum: uint32(TMCloseTunnelSeq),
+	})
+}
 
 const (
 	TMConnBiuniqueMode = iota
