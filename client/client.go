@@ -8,13 +8,13 @@ import (
 	"github.com/jim3ma/gota/utils"
 	"io"
 	"net"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"syscall"
 	"time"
-	"runtime/debug"
-	_ "net/http/pprof"
-	"net/http"
 )
 
 type ConnManager struct {
@@ -28,12 +28,12 @@ type ConnManager struct {
 }
 
 func newConnManager(in <-chan *net.TCPConn, x2cChannel chan dataFrame, c2xChannel chan dataFrame) *ConnManager {
-	close := make(chan uint16)
+	closeChannel := make(chan uint16)
 	connPool := make(map[uint16]*ConnHandler)
 	c := &ConnManager{
 		nextConnID:       1,
 		connChannel:      in,
-		connCloseChannel: close,
+		connCloseChannel: closeChannel,
 		x2cChannel:       x2cChannel,
 		c2xChannel:       c2xChannel,
 		connectionPool:   connPool,
@@ -77,7 +77,7 @@ func (c *ConnManager) handleConn() {
 // s2c from c2xChannel and forward to special s2c channel according the connection ID
 func (c *ConnManager) dispatch() {
 	for d := range c.c2xChannel {
-		log.Debugf("Received data from tunnel: %v", d)
+		log.Debugf("Received data from tunnel: %+v", d)
 		if ch, ok := c.connectionPool[d.ConnId]; ok {
 			ch.c2xChannel <- d
 		} else {
@@ -139,9 +139,6 @@ func (ch *ConnHandler) x2c() {
 	for {
 		data := make([]byte, MaxDataLength)
 		n, err := ch.conn.Read(data)
-		if err != nil && err != io.EOF {
-			panic(err)
-		}
 		if n > 0 {
 			df := dataFrame{
 				ConnId: ch.cid,
@@ -152,10 +149,13 @@ func (ch *ConnHandler) x2c() {
 			seq += 1
 			ch.x2cChannel <- df
 		} else {
-			log.Error("Read empty data")
+			log.Warn("Received empty data from x")
 		}
 		if err == io.EOF {
-			return
+			break
+		}
+		if err != nil {
+			panic(err)
 		}
 	}
 }
@@ -163,7 +163,7 @@ func (ch *ConnHandler) x2c() {
 func (ch *ConnHandler) c2x() {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Error("Write data failed: %v", r)
+			log.Error("Write data failed: %s", r)
 			log.Errorf("Call stack: %s", debug.Stack())
 		}
 	}()
@@ -172,6 +172,7 @@ func (ch *ConnHandler) c2x() {
 	seq = 1
 	cache := make(map[uint32][]byte)
 	for d := range ch.c2xChannel {
+		log.Debugf("Received from tunnel, data frame: %+v", d)
 		if d.SeqNum == seq {
 			_, err := ch.conn.Write(d.data)
 			if err != nil && err != io.EOF {
@@ -185,10 +186,9 @@ func (ch *ConnHandler) c2x() {
 			if len(cache) == 0 {
 				continue
 			}
-			// TODO check cache and c2s to client
+			// TODO check cache and send to client
 			for {
-				data, ok := cache[seq]
-				if ok {
+				if data, ok := cache[seq]; ok {
 					_, err := ch.conn.Write(data)
 					if err != nil && err != io.EOF {
 						panic(err)
@@ -198,11 +198,13 @@ func (ch *ConnHandler) c2x() {
 					}
 					delete(cache, seq)
 					seq += 1
+				} else {
+					break
 				}
-				break
 			}
 		} else if d.SeqNum > seq {
 			// TODO cache for disorder data frame
+			log.Debugf("Want to receive data frame seq: %d, but received seq: %d", seq, d.SeqNum)
 			cache[d.SeqNum] = d.data
 		}
 	}
@@ -253,7 +255,7 @@ func (t *TunnelManager) start() {
 	}
 	for _, lAddr := range t.localIPs {
 		for _, rAddr := range t.remoteAddrs {
-			log.Infof("local IP address: %s, remote address: %s", lAddr, rAddr)
+			log.Infof("Local IP address: %s, remote address: %s", lAddr, rAddr)
 			heartbeat := make(chan int)
 			tw := &TunnelWorker{
 				localAddr:     lAddr,
@@ -263,7 +265,7 @@ func (t *TunnelManager) start() {
 				x2cChannel:    t.x2cChannel,
 				c2xChannel:    t.c2xChannel,
 			}
-			tw.start()
+			go tw.start()
 		}
 	}
 }
@@ -280,6 +282,8 @@ type TunnelWorker struct {
 	x2cChannel <-chan dataFrame
 	// s2c from server and c2s to client
 	c2xChannel chan<- dataFrame
+	stat utils.Statistic
+	conn *net.TCPConn
 	//retryTime int
 }
 
@@ -293,11 +297,20 @@ func (tw *TunnelWorker) heartbeat() {
 				log.Debug("Tunnel work was canneled")
 				break
 			}
+		case <-time.After(time.Second * TMStatReportSecond):
+			log.Infof("Traffic Report for client(%v) & server(%v): { sent: %d bytes, %d/second, received: %d bytes, %d/second }",
+				tw.conn.LocalAddr(), tw.conn.RemoteAddr(),
+				tw.stat.SentBytes, tw.stat.SendSpeed(), tw.stat.ReceivedBytes, tw.stat.ReceiveSpeed())
 		}
 	}
 }
 
 func (tw *TunnelWorker) start() {
+	tw.stat = utils.Statistic{
+		SentBytes: 0,
+		ReceivedBytes: 0,
+		StartSeconds: time.Now().Unix(),
+	}
 	// connect server
 	lAddr, err := net.ResolveTCPAddr("tcp", tw.localAddr+":0")
 	if err != nil {
@@ -346,15 +359,15 @@ func (tw *TunnelWorker) c2s(done chan<- int, conn *net.TCPConn) {
 
 	log.Debugf("Tunnel work start to forward data from x client(%v) to server(%v)", conn.LocalAddr(), conn.RemoteAddr())
 	for {
-		// register to pool
-		//tw.SWokerPool <- tw
 		select {
 		case d := <-tw.x2cChannel:
-			_, err := conn.Write(wrapDataFrame(d))
-			if err != nil {
+			n, err := conn.Write(wrapDataFrame(d))
+			if err != nil || n < 8 {
 				panic(err)
 			}
-			log.Debugf("Received data frame from x, send to server, data: %v", d)
+			tw.stat.AddSentBytes(uint64(n))
+			log.Debugf("Wrote %d bytes", n)
+			log.Debugf("Received data frame from x, send to server, data: %+v", d)
 		case <-tw.cancelChannel:
 			log.Infof("Shutdown Worker: %v", tw)
 			_, err := conn.Write(TMCloseTunnelBytes)
@@ -367,7 +380,7 @@ func (tw *TunnelWorker) c2s(done chan<- int, conn *net.TCPConn) {
 			_, err := conn.Write(TMHeartBeatBytes)
 			log.Debugf("Sent heartbeat to server(%s) from client(%s)", conn.RemoteAddr(), conn.LocalAddr())
 			if err != nil {
-				log.Fatalf("HeartBeat failed duo to: %s", err)
+				log.Errorf("HeartBeat failed duo to: %s, stop this worker", err)
 				//tw.cancelFlag = -1
 				return
 			}
@@ -389,7 +402,10 @@ func (tw *TunnelWorker) s2c(done chan<- int, conn *net.TCPConn) {
 	for {
 		header := make([]byte, 8)
 		n, err := conn.Read(header)
-		if err != io.EOF && (err != nil || n != 8 ) {
+		if n == 0 && err == nil {
+			log.Debug("Receive empth data, skip and continue")
+			continue
+		} else if err != io.EOF && (err != nil || n != 8) {
 			log.Error("Received data frame header error")
 			//panic(err)
 		}
@@ -399,7 +415,7 @@ func (tw *TunnelWorker) s2c(done chan<- int, conn *net.TCPConn) {
 			break
 		}
 		df := unWrapDataFrame(header)
-		log.Debugf("Received data frame from server: %v", df)
+		log.Debugf("Received data frame header from server: %+v", df)
 
 		if df.Length == 0 {
 			switch df.SeqNum {
@@ -427,12 +443,14 @@ func (tw *TunnelWorker) s2c(done chan<- int, conn *net.TCPConn) {
 
 		data := make([]byte, MaxDataLength)
 		n, err = conn.Read(data)
+		// TODO partial data received!
 		if (err != nil && err != io.EOF) || n != int(df.Length) {
 			log.Errorf("Received mismatched length data, stop this worker(client: %v, server: %v)",
 				conn.LocalAddr(), conn.RemoteAddr())
 			break
 		}
 		df.data = data[:n]
+		tw.stat.AddReceivedBytes(uint64(n))
 		tw.c2xChannel <- df
 
 		if tw.cancelFlag == -1 || err == io.EOF {
@@ -447,7 +465,8 @@ const MaxDataLength = 65536
 const MaxConnID = 65535
 
 // Connection Manage HeartBeat Time
-const TMHeartBeatSecond = 15
+const TMHeartBeatSecond = 300
+const TMStatReportSecond = 30
 
 // Magic data frame
 // when length == 0 the data frame is used for control the tunnels and connections
@@ -502,9 +521,9 @@ func wrapDataFrame(data dataFrame) []byte {
 	binary.LittleEndian.PutUint16(cid, data.ConnId)
 	buf.Write(cid)
 
-	len := make([]byte, 2)
-	binary.LittleEndian.PutUint16(len, data.Length)
-	buf.Write(len)
+	lens := make([]byte, 2)
+	binary.LittleEndian.PutUint16(lens, data.Length)
+	buf.Write(lens)
 
 	seq := make([]byte, 4)
 	binary.LittleEndian.PutUint32(seq, data.SeqNum)
@@ -516,11 +535,11 @@ func wrapDataFrame(data dataFrame) []byte {
 
 func unWrapDataFrame(h []byte) dataFrame {
 	cid := binary.LittleEndian.Uint16(h[:2])
-	len := binary.LittleEndian.Uint16(h[2:4])
+	lens := binary.LittleEndian.Uint16(h[2:4])
 	seq := binary.LittleEndian.Uint32(h[4:])
 	return dataFrame{
 		ConnId: cid,
-		Length: len,
+		Length: lens,
 		SeqNum: seq,
 	}
 	/*
@@ -529,7 +548,7 @@ func unWrapDataFrame(h []byte) dataFrame {
 			panic(fmt.Sprintf("Error Data Frame Header: %s", h))
 		}
 
-		len, n := binary.Uvarint(h[2:4])
+		lens, n := binary.Uvarint(h[2:4])
 		if n <= 0 {
 			panic(fmt.Sprintf("Error Data Frame Header: %s", h))
 		}
@@ -540,7 +559,7 @@ func unWrapDataFrame(h []byte) dataFrame {
 		}
 		return dataFrame{
 			uint16(cid),
-			uint16(len),
+			uint16(lens),
 			uint32(seq),
 			nil}
 	*/

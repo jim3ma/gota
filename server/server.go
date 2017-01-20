@@ -8,13 +8,13 @@ import (
 	"github.com/jim3ma/gota/utils"
 	"io"
 	"net"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"syscall"
 	"time"
-	"runtime/debug"
-	_ "net/http/pprof"
-	"net/http"
 )
 
 type ConnManager struct {
@@ -28,14 +28,14 @@ type ConnManager struct {
 	remoteAddr       string
 }
 
-func newConnManager(cid <-chan uint16, sendChannel chan dataFrame, receiveChannel chan dataFrame, rAddr string) *ConnManager {
-	close := make(chan uint16)
+func newConnManager(cid <-chan uint16, r2s chan dataFrame, s2r chan dataFrame, rAddr string) *ConnManager {
+	closeChannel := make(chan uint16)
 	connPool := make(map[uint16]*ConnHandler)
 	c := &ConnManager{
 		connIdChannel:    cid,
-		connCloseChannel: close,
-		r2sChannel:       sendChannel,
-		s2rhannel:        receiveChannel,
+		connCloseChannel: closeChannel,
+		r2sChannel:       r2s,
+		s2rhannel:        s2r,
 		remoteAddr:       rAddr,
 		connectionPool:   connPool,
 	}
@@ -46,6 +46,7 @@ func newConnManager(cid <-chan uint16, sendChannel chan dataFrame, receiveChanne
 // c2s connection for local port, and dispatch a Connection Handler to forward traffic
 func (c *ConnManager) handleConn() {
 	go c.closeConn()
+	go c.dispatch()
 	for cid := range c.connIdChannel {
 		//t.mutex.Lock()
 		s2rChannel := make(chan dataFrame)
@@ -75,26 +76,30 @@ func (c *ConnManager) dispatch() {
 		if ch, ok := c.connectionPool[d.ConnId]; ok {
 			ch.s2rChannel <- d
 		} else {
-			log.Errorf("Connection didn't exist, connection id: %d", d.ConnId)
+			log.Errorf("Connection didn't exist, connection id: %d, dropped", d.ConnId)
 		}
 	}
 }
 
 func (c *ConnManager) closeConn() {
-	defer func(){
+	defer func() {
 		if r := recover(); r != nil {
 			log.Errorf("Close connection error: %s", r)
 			log.Errorf("Call stack: %s", debug.Stack())
+
 			go c.closeConn()
 		}
 	}()
 	for cid := range c.connCloseChannel {
 		// TODO runtime error
 		// invalid memory address or nil pointer dereference
-		err := c.connectionPool[cid].conn.Close()
+		conn := c.connectionPool[cid].conn
+		log.Debugf("Try to close connection from server(%v) to remote(%v)", conn.LocalAddr(), conn.RemoteAddr())
+		err := conn.Close()
 		if err != nil {
 			log.Errorf("Close connection Error: %s", err)
 		}
+		log.Debugf("Closed connection from server(%v) to remote(%v)", conn.LocalAddr(), conn.RemoteAddr())
 		delete(c.connectionPool, cid)
 	}
 }
@@ -151,9 +156,6 @@ func (ch *ConnHandler) r2s() {
 	for {
 		data := make([]byte, MaxDataLength)
 		n, err := ch.conn.Read(data)
-		if err != nil && err != io.EOF {
-			panic(err)
-		}
 		if n > 0 {
 			df := dataFrame{
 				ConnId: ch.cid,
@@ -164,10 +166,14 @@ func (ch *ConnHandler) r2s() {
 			seq += 1
 			ch.r2sChannel <- df
 		} else {
-			log.Error("Read empty data")
+			log.Warn("Received empty data from remote")
 		}
 		if err == io.EOF {
-			return
+			log.Debugf("Received io.EOF from remote(%v)", ch.conn.RemoteAddr())
+			break
+		}
+		if err != nil {
+			panic(err)
 		}
 	}
 }
@@ -186,12 +192,13 @@ func (ch *ConnHandler) s2r() {
 	cache := make(map[uint32][]byte)
 	for d := range ch.s2rChannel {
 		if d.SeqNum == seq {
-			_, err := ch.conn.Write(d.data)
+			n, err := ch.conn.Write(d.data)
 			if err != nil && err != io.EOF {
 				panic(err)
 			}
+			log.Debugf("Wrote data to remote, %d bytes", n)
 			if err == io.EOF {
-				return
+				break
 			}
 			seq += 1
 
@@ -200,8 +207,7 @@ func (ch *ConnHandler) s2r() {
 			}
 			// TODO check cache and s2c to client
 			for {
-				data, ok := cache[seq]
-				if ok {
+				if data, ok := cache[seq]; ok {
 					_, err := ch.conn.Write(data)
 					if err != nil && err != io.EOF {
 						panic(err)
@@ -211,8 +217,9 @@ func (ch *ConnHandler) s2r() {
 					}
 					delete(cache, seq)
 					seq += 1
+				} else {
+					break
 				}
-				break
 			}
 		} else if d.SeqNum > seq {
 			// TODO cache for disorder data frame
@@ -354,7 +361,7 @@ func (tw *TunnelWorker) s2c(done chan<- int, conn *net.TCPConn) {
 	for {
 		select {
 		case d := <-tw.r2sChannel:
-			log.Debugf("Received data from remote: %v", d)
+			log.Debugf("Received data from remote: %+v", d)
 			n, err := conn.Write(wrapDataFrame(d))
 			if err != nil {
 				panic(err)
@@ -392,8 +399,11 @@ func (tw *TunnelWorker) c2s(done chan<- int, conn *net.TCPConn) {
 	for {
 		header := make([]byte, 8)
 		n, err := conn.Read(header)
-		if err != io.EOF && (err != nil || n != 8 ){
-			log.Error("Data frame header error")
+		if n == 0 && err == nil {
+			log.Debug("Receive empth data, skip and continue")
+			continue
+		} else if err != io.EOF && (err != nil || n != 8) {
+			log.Error("Receive data frame header error")
 			//panic(err)
 		}
 		if err == io.EOF {
@@ -403,7 +413,7 @@ func (tw *TunnelWorker) c2s(done chan<- int, conn *net.TCPConn) {
 		}
 
 		df := unWrapDataFrame(header)
-		log.Debugf("Received data frame from client: %v", df)
+		log.Debugf("Received data frame header from client: %+v", df)
 
 		if df.Length == 0 {
 			switch df.SeqNum {
@@ -429,10 +439,11 @@ func (tw *TunnelWorker) c2s(done chan<- int, conn *net.TCPConn) {
 		data := make([]byte, MaxDataLength)
 		n, err = conn.Read(data)
 		if (err != nil && err != io.EOF) || n != int(df.Length) {
-			log.Errorf("Data frame length mismatch, header: %v", df)
+			log.Errorf("Data frame length mismatch, header: %+v", df)
 			panic(err)
 		}
 		df.data = data[:n]
+		log.Debugf("Received data frame from client: %+v", df)
 		tw.s2rChannel <- df
 
 		if tw.cancelFlag == -1 || err == io.EOF {
@@ -447,7 +458,7 @@ const MaxDataLength = 65536
 const MaxConnID = 65535
 
 // Connection Manage HeartBeat Time
-const TMHeartBeatSecond = 15
+const TMHeartBeatSecond = 300
 
 // Magic data frame
 // when length == 0 the data frame is used for control the tunnels and connections
@@ -502,9 +513,9 @@ func wrapDataFrame(data dataFrame) []byte {
 	binary.LittleEndian.PutUint16(cid, data.ConnId)
 	buf.Write(cid)
 
-	len := make([]byte, 2)
-	binary.LittleEndian.PutUint16(len, data.Length)
-	buf.Write(len)
+	lens := make([]byte, 2)
+	binary.LittleEndian.PutUint16(lens, data.Length)
+	buf.Write(lens)
 
 	seq := make([]byte, 4)
 	binary.LittleEndian.PutUint32(seq, data.SeqNum)
@@ -516,11 +527,11 @@ func wrapDataFrame(data dataFrame) []byte {
 
 func unWrapDataFrame(h []byte) dataFrame {
 	cid := binary.LittleEndian.Uint16(h[:2])
-	len := binary.LittleEndian.Uint16(h[2:4])
+	lens := binary.LittleEndian.Uint16(h[2:4])
 	seq := binary.LittleEndian.Uint32(h[4:])
 	return dataFrame{
 		ConnId: cid,
-		Length: len,
+		Length: lens,
 		SeqNum: seq,
 	}
 	/*
@@ -573,7 +584,7 @@ func main() {
 	// TODO configuration
 	log.SetLevel(log.DebugLevel)
 	localAddr := "localhost:8080"
-	remoteAddr := "10.202.240.251:80"
+	remoteAddr := "baidu.com:80"
 
 	newconnIdChannel := make(chan uint16)
 
