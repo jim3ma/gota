@@ -1,6 +1,10 @@
 package utils
 
-import "time"
+import (
+	"time"
+	"bytes"
+	"net"
+)
 
 // Statistic contains the traffic status
 type Statistic struct {
@@ -29,3 +33,28 @@ func (s *Statistic) ReceiveSpeed() int64 {
 	return s.ReceivedBytes/int64(t)
 }
 
+func ReadNBytes(conn *net.TCPConn, n int) ([]byte, error){
+	var buf bytes.Buffer
+	for remain := n; remain > 0; {
+		data := make([]byte, remain)
+		rn, err := conn.Read(data)
+
+		if err != nil {
+			return nil, err
+		}
+		remain = remain - rn
+		buf.Write(data[:rn])
+	}
+	return buf.Bytes(), nil
+}
+
+func WriteNBytes(conn *net.TCPConn, n int, d []byte) error{
+	for wrote := 0; wrote < n; {
+		wn, err := conn.Write(d[:wrote])
+		if err != nil {
+			return err
+		}
+		wrote = wrote + wn
+	}
+	return nil
+}

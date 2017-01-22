@@ -1,6 +1,7 @@
 package main
 
 import (
+	//"bytes"
 	"fmt"
 	"io"
 	"net"
@@ -314,7 +315,7 @@ type TunnelWorker struct {
 	// s2c from server and c2s to client
 	c2xChannel chan<- utils.GotaFrame
 	stat utils.Statistic
-	conn *net.TCPConn
+	//conn *net.TCPConn
 	//retryTime int
 }
 
@@ -323,7 +324,6 @@ func (tw *TunnelWorker) heartbeat() {
 		if r := recover(); r != nil {
 			log.Errorf("Heartbeat error: %s", r)
 			log.Errorf("Call stack: %s", debug.Stack())
-
 			go tw.heartbeat()
 		}
 	}()
@@ -411,8 +411,12 @@ func (tw *TunnelWorker) c2s(done chan<- int, conn *net.TCPConn) {
 			if err != nil || n < 8 {
 				panic(err)
 			}
-			tw.stat.AddSentBytes(int64(n))
-			log.Debugf("Wrote %d bytes", n)
+			/*err := utils.WriteNBytes(conn, d.Length, utils.WrapDataFrame(d))
+			if err != nil {
+				panic(err)
+			}*/
+			tw.stat.AddSentBytes(int64(d.Length))
+			log.Debugf("Wrote %d bytes", d.Length)
 			log.Debugf("Received data frame from x, send to server, data: %+v", d)
 		case <-tw.cancelChannel:
 			log.Infof("Shutdown Worker: %v", tw)
@@ -489,19 +493,26 @@ func (tw *TunnelWorker) s2c(done chan<- int, conn *net.TCPConn) {
 			}
 		}
 
-		data := make([]byte, df.Length)
-		n, err = conn.Read(data)
-		// TODO partial data received!
-		if (err != nil && err != io.EOF) || n != int(df.Length) {
-			log.Errorf("Received mismatched length data, connection id: %d, seq: %d, length: %d, received length: %d, received data: %+v",
-				df.ConnId, df.SeqNum, df.Length, n, data[:n])
-			log.Errorf("Received mismatched length data, stop this worker(client: %v, server: %v)",
-				conn.LocalAddr(), conn.RemoteAddr())
-			log.Errorf("Received data length: %+v, data: %+v", n, data)
-			//tw.cancelChannel <- 0
-			break
+		/*var buf bytes.Buffer
+		for remain := df.Length; remain > 0; {
+			data := make([]byte, remain)
+			n, err = conn.Read(data)
+
+			// TODO error handle
+			if err != nil {
+				panic(err)
+			}
+			remain = remain - uint16(n)
+			buf.Write(data[:n])
 		}
-		df.Data = data[:n]
+
+		df.Data = buf.Bytes()*/
+
+		df.Data, err = utils.ReadNBytes(conn, int(df.Length))
+		if err != nil {
+			panic(err)
+		}
+
 		tw.stat.AddReceivedBytes(int64(n))
 		tw.c2xChannel <- df
 
@@ -549,7 +560,8 @@ func main() {
 
 	cancelChannel := make(chan int)
 	//tm := newTunnelManager(x2cChannel, c2xChannel, cancelChannel, TMConnBiuniqueMode, []string{"127.0.0.1", "127.0.0.1"}, []string{"127.0.0.1:8080", "127.0.0.1:8080"})
-	tm := newTunnelManager(x2cChannel, c2xChannel, cancelChannel, utils.TMConnBiuniqueMode, []string{"127.0.0.1"}, []string{"127.0.0.1:8080"})
+	tm := newTunnelManager(x2cChannel, c2xChannel, cancelChannel, utils.TMConnBiuniqueMode, []string{ "127.0.0.1"}, []string{"127.0.0.1:8080"})
+	//tm := newTunnelManager(x2cChannel, c2xChannel, cancelChannel, utils.TMConnBiuniqueMode, []string{"192.168.91.128"}, []string{"192.168.91.128:8080"})
 	go tm.start()
 
 	sigs := make(chan os.Signal, 1)

@@ -382,10 +382,12 @@ func (tw *TunnelWorker) s2c(done chan<- int, conn *net.TCPConn) {
 		case d := <-tw.r2sChannel:
 			log.Debugf("Received data from remote: %+v", d)
 			n, err := conn.Write(utils.WrapDataFrame(d))
+			//err := utils.WriteNBytes(conn, int(d.Length) + 8, utils.WrapDataFrame(d))
 			if err != nil {
 				panic(err)
 			}
 			log.Debugf("Wrote data frame to tunnel, length: %d", n)
+			//log.Debugf("Wrote data frame to tunnel, length: %d", int32(d.Length) + 8)
 		case <-tw.cancelChannel:
 			log.Infof("Shutdown worker: %v", tw)
 			_, err := conn.Write(utils.TMCloseTunnelBytes)
@@ -456,13 +458,11 @@ func (tw *TunnelWorker) c2s(done chan<- int, conn *net.TCPConn) {
 			}
 		}
 
-		data := make([]byte, df.Length)
-		n, err = conn.Read(data)
-		if (err != nil && err != io.EOF) || n != int(df.Length) {
-			log.Errorf("Data frame length mismatch, header: %+v", df)
+		df.Data, err = utils.ReadNBytes(conn, int(df.Length))
+		if err != nil {
 			panic(err)
 		}
-		df.Data = data[:n]
+
 		log.Debugf("Received data frame from client: %+v", df)
 		tw.s2rChannel <- df
 
