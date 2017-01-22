@@ -11,7 +11,6 @@ type GotaFrame struct {
 	// Connection ID
 	ConnId uint16
 
-
 	// Sequence number
 	SeqNum uint32
 
@@ -23,6 +22,8 @@ type GotaFrame struct {
 
 const MaxDataLength = 32 * 1024
 const MaxConnID = 64 * 1024 - 1
+
+const CtrlFrameLength  = 0
 
 // Connection Manage HeartBeat Time
 const TMHeartBeatSecond = 300

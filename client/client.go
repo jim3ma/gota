@@ -57,6 +57,8 @@ func (c *ConnManager) handleConn() {
 			connCloseChannel: c.connCloseChannel,
 			x2cChannel:       c.x2cChannel,
 			c2xChannel:       c2xChannel,
+			readClosed: false,
+			writeClosed: false,
 		}
 		// all handlers share one c2s channel, and every handler uses one s2c channel,
 		// we need register the s2c channel, so we can forward traffic from tunnels to local connection
@@ -112,6 +114,8 @@ type ConnHandler struct {
 	connCloseChannel chan<- uint16
 	x2cChannel       chan<- utils.GotaFrame
 	c2xChannel       chan utils.GotaFrame
+	writeClosed      bool
+	readClosed       bool
 }
 
 func (ch *ConnHandler) start() {
@@ -162,6 +166,16 @@ func (ch *ConnHandler) x2c() {
 			log.Warn("Received empty data from x")
 		}
 		if err == io.EOF {
+			log.Debugf("Received io.EOF from x(%v), start to close write connection on server", ch.conn.RemoteAddr())
+
+			// close write connection between server and client
+			ch.x2cChannel <- utils.GotaFrame{
+				ConnId: uint16(ch.cid),
+				Length: uint16(0),
+				SeqNum: uint32(utils.TMCloseConnSeq),
+			}
+			ch.conn.CloseRead()
+			ch.readClosed = true
 			break
 		}
 		if err != nil {
@@ -182,6 +196,13 @@ func (ch *ConnHandler) c2x() {
 	seq = 1
 	cache := make(map[uint32][]byte)
 	for d := range ch.c2xChannel {
+		if d.Length == utils.CtrlFrameLength {
+			if d.SeqNum == utils.TMCloseConnSeq {
+				log.Debugf("Received close write connection signal, try to close write connection")
+				ch.conn.CloseWrite()
+				return
+			}
+		}
 		log.Debugf("Received from tunnel, data frame: %+v", d)
 		if d.SeqNum == seq {
 			_, err := ch.conn.Write(d.Data)
@@ -447,18 +468,20 @@ func (tw *TunnelWorker) s2c(done chan<- int, conn *net.TCPConn) {
 			case utils.TMHeartBeatSeq:
 				log.Debugf("Received heartbeat signal from server(%s) to client(%s)", conn.RemoteAddr(), conn.LocalAddr())
 				continue
-			case utils.TMCloseConnSeq:
-				log.Debug("Received close connection signal")
-				// TODO close connection
-			case utils.TMCreateConnSeq:
-				log.Debug("Received create connection signal")
-				log.Error("Create connection cignal only used in server")
+			//case utils.TMCreateConnSeq:
+			//	log.Debug("Received create connection signal")
+			//	log.Error("Create connection signal only used in server")
+			//	continue
 			case utils.TMCreateConnOKSeq:
 				log.Debugf("Received create connection ok signal, connection id: %d", df.ConnId)
 				tw.c2xChannel <- df
 				continue
-			case utils.TMCloseTunnelSeq:
-				log.Info("Receive close tunnel signal")
+			case utils.TMCloseConnSeq:
+				log.Debug("Received close connection signal")
+				tw.c2xChannel <- df
+				continue
+			//case utils.TMCloseTunnelSeq:
+			//	log.Info("Receive close tunnel signal")
 				// TODO close tunnel
 			default:
 				log.Errorf("Unkownn signal: %d", df.SeqNum)

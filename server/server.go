@@ -111,6 +111,8 @@ type ConnHandler struct {
 	// c2s from client
 	s2rChannel chan utils.GotaFrame
 	remoteAddr string
+	writeClosed      bool
+	readClosed       bool
 }
 
 func (ch *ConnHandler) start() {
@@ -170,7 +172,15 @@ func (ch *ConnHandler) r2s() {
 			log.Warn("Received empty data from remote")
 		}
 		if err == io.EOF {
-			log.Debugf("Received io.EOF from remote(%v)", ch.conn.RemoteAddr())
+			log.Debugf("Received io.EOF from x(%v), start to close write connection on client ", ch.conn.RemoteAddr())
+			// close write connection between client and x
+			ch.r2sChannel <- utils.GotaFrame{
+				ConnId: uint16(ch.cid),
+				Length: uint16(0),
+				SeqNum: uint32(utils.TMCloseConnSeq),
+			}
+			ch.conn.CloseRead()
+			ch.readClosed = true
 			break
 		}
 		if err != nil {
@@ -192,6 +202,14 @@ func (ch *ConnHandler) s2r() {
 	seq = 1
 	cache := make(map[uint32][]byte)
 	for d := range ch.s2rChannel {
+		if d.Length == utils.CtrlFrameLength {
+			if d.SeqNum == utils.TMCloseConnSeq {
+				log.Debugf("Received close write connection signal, try to close write connection")
+				ch.conn.CloseWrite()
+				ch.writeClosed = true
+				return
+			}
+		}
 		if d.SeqNum == seq {
 			n, err := ch.conn.Write(d.Data)
 			if err != nil && err != io.EOF {
@@ -421,16 +439,17 @@ func (tw *TunnelWorker) c2s(done chan<- int, conn *net.TCPConn) {
 			case utils.TMHeartBeatSeq:
 				log.Debugf("Received heartbeat signal from client(%s) to server(%s)", conn.RemoteAddr(), conn.LocalAddr())
 				continue
-			case utils.TMCloseConnSeq:
-				log.Debug("Received close connection signal")
-			// TODO close connection
 			case utils.TMCreateConnSeq:
 				log.Debug("Received create connection signal")
 				tw.connIdChannel <- df.ConnId
 				continue
-			case utils.TMCloseTunnelSeq:
-				log.Info("Receive close tunnel signal")
-			// TODO close tunnel
+			case utils.TMCloseConnSeq:
+				log.Debug("Received close connection signal")
+				tw.s2rChannel <- df
+				continue
+			//case utils.TMCloseTunnelSeq:
+			//	log.Info("Receive close tunnel signal")
+				// TODO close tunnel
 			default:
 				log.Errorf("Unkownn Signal: %d", df.SeqNum)
 				panic("Unkownn Signal")
