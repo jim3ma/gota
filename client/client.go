@@ -407,14 +407,14 @@ func (tw *TunnelWorker) c2s(done chan<- int, conn *net.TCPConn) {
 	for {
 		select {
 		case d := <-tw.x2cChannel:
-			n, err := conn.Write(utils.WrapDataFrame(d))
-			if err != nil || n < 8 {
-				panic(err)
-			}
-			/*err := utils.WriteNBytes(conn, d.Length, utils.WrapDataFrame(d))
+			//n, err := conn.Write(utils.WrapDataFrame(d))
+			//if err != nil || n < 8 {
+			//	panic(err)
+			//}
+			err := utils.WriteNBytes(conn, int(d.Length) + 8, utils.WrapDataFrame(d))
 			if err != nil {
 				panic(err)
-			}*/
+			}
 			tw.stat.AddSentBytes(int64(d.Length))
 			log.Debugf("Wrote %d bytes", d.Length)
 			log.Debugf("Received data frame from x, send to server, data: %+v", d)

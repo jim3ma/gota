@@ -381,13 +381,13 @@ func (tw *TunnelWorker) s2c(done chan<- int, conn *net.TCPConn) {
 		select {
 		case d := <-tw.r2sChannel:
 			log.Debugf("Received data from remote: %+v", d)
-			n, err := conn.Write(utils.WrapDataFrame(d))
-			//err := utils.WriteNBytes(conn, int(d.Length) + 8, utils.WrapDataFrame(d))
+			//n, err := conn.Write(utils.WrapDataFrame(d))
+			err := utils.WriteNBytes(conn, int(d.Length) + 8, utils.WrapDataFrame(d))
 			if err != nil {
 				panic(err)
 			}
-			log.Debugf("Wrote data frame to tunnel, length: %d", n)
-			//log.Debugf("Wrote data frame to tunnel, length: %d", int32(d.Length) + 8)
+			//log.Debugf("Wrote data frame to tunnel, length: %d", n)
+			log.Debugf("Wrote data frame to tunnel, length: %d", int32(d.Length) + 8)
 		case <-tw.cancelChannel:
 			log.Infof("Shutdown worker: %v", tw)
 			_, err := conn.Write(utils.TMCloseTunnelBytes)
