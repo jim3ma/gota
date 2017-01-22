@@ -1,20 +1,18 @@
 package main
 
 import (
-	"bytes"
-	"encoding/binary"
 	"fmt"
-	log "github.com/Sirupsen/logrus"
-	"github.com/jim3ma/gota/utils"
 	"io"
 	"net"
 	"net/http"
-	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"runtime/debug"
 	"syscall"
 	"time"
+	_ "net/http/pprof"
+	"github.com/jim3ma/gota/utils"
+	log "github.com/Sirupsen/logrus"
 )
 
 type ConnManager struct {
@@ -22,13 +20,13 @@ type ConnManager struct {
 	connIdChannel    <-chan uint16
 	connChannel      <-chan *net.TCPConn
 	connCloseChannel chan uint16
-	r2sChannel       chan<- dataFrame
-	s2rhannel        <-chan dataFrame
+	r2sChannel       chan<- utils.GotaFrame
+	s2rhannel        <-chan utils.GotaFrame
 	connectionPool   map[uint16]*ConnHandler
 	remoteAddr       string
 }
 
-func newConnManager(cid <-chan uint16, r2s chan dataFrame, s2r chan dataFrame, rAddr string) *ConnManager {
+func newConnManager(cid <-chan uint16, r2s chan utils.GotaFrame, s2r chan utils.GotaFrame, rAddr string) *ConnManager {
 	closeChannel := make(chan uint16)
 	connPool := make(map[uint16]*ConnHandler)
 	c := &ConnManager{
@@ -49,7 +47,7 @@ func (c *ConnManager) handleConn() {
 	go c.dispatch()
 	for cid := range c.connIdChannel {
 		//t.mutex.Lock()
-		s2rChannel := make(chan dataFrame)
+		s2rChannel := make(chan utils.GotaFrame)
 		ch := ConnHandler{
 			cid:              cid,
 			connCloseChannel: c.connCloseChannel,
@@ -109,9 +107,9 @@ type ConnHandler struct {
 	conn             *net.TCPConn
 	connCloseChannel chan<- uint16
 	// s2c to client
-	r2sChannel chan<- dataFrame
+	r2sChannel chan<- utils.GotaFrame
 	// c2s from client
-	s2rChannel chan dataFrame
+	s2rChannel chan utils.GotaFrame
 	remoteAddr string
 }
 
@@ -119,20 +117,20 @@ func (ch *ConnHandler) start() {
 	// create connection to remote
 	rAddr, err := net.ResolveTCPAddr("tcp", ch.remoteAddr)
 	if err != nil {
-		log.Debug("Create new connection to remote error: %s", err)
+		log.Debugf("Create new connection to remote error: %s", err)
 		return
 	}
 	ch.conn, err = net.DialTCP("tcp", nil, rAddr)
 	if err != nil {
-		log.Debug("Create new connection to remote error: %s", err)
+		log.Debugf("Create new connection to remote error: %s", err)
 		return
 	}
 
 	// s2c response
-	resp := dataFrame{
+	resp := utils.GotaFrame{
 		ConnId: ch.cid,
 		Length: 0,
-		SeqNum: uint32(TMCreateConnOKSeq),
+		SeqNum: uint32(utils.TMCreateConnOKSeq),
 	}
 	log.Debugf("Created a peer connection on server, connection id: %d", ch.cid)
 	ch.r2sChannel <- resp
@@ -154,14 +152,17 @@ func (ch *ConnHandler) r2s() {
 	var seq uint32
 	seq = 1
 	for {
-		data := make([]byte, MaxDataLength)
+		data := make([]byte, utils.MaxDataLength)
 		n, err := ch.conn.Read(data)
 		if n > 0 {
-			df := dataFrame{
+			log.Debugf("Received %d bytes from remote", n)
+
+			log.Debugf("Received bytes from remote, connection id: %d, seq: %d, wrote length: %d", ch.cid, seq, n)
+			df := utils.GotaFrame{
 				ConnId: ch.cid,
 				SeqNum: seq,
 				Length: uint16(n),
-				data:   data[:n],
+				Data:   data[:n],
 			}
 			seq += 1
 			ch.r2sChannel <- df
@@ -192,11 +193,11 @@ func (ch *ConnHandler) s2r() {
 	cache := make(map[uint32][]byte)
 	for d := range ch.s2rChannel {
 		if d.SeqNum == seq {
-			n, err := ch.conn.Write(d.data)
+			n, err := ch.conn.Write(d.Data)
 			if err != nil && err != io.EOF {
 				panic(err)
 			}
-			log.Debugf("Wrote data to remote, %d bytes", n)
+			log.Debugf("Wrote data to remote, connection id: %d, seq: %d, length: %d, wrote length: %d", d.ConnId, d.SeqNum, d.Length, n)
 			if err == io.EOF {
 				break
 			}
@@ -223,7 +224,7 @@ func (ch *ConnHandler) s2r() {
 			}
 		} else if d.SeqNum > seq {
 			// TODO cache for disorder data frame
-			cache[d.SeqNum] = d.data
+			cache[d.SeqNum] = d.Data
 		}
 	}
 }
@@ -235,15 +236,15 @@ type TunnelManager struct {
 	// Receive Worker pool
 	//RWokerPool chan *TunnelWorker
 	connIdChannel chan<- uint16
-	r2sChannel    <-chan dataFrame
-	s2rChannel    chan<- dataFrame
+	r2sChannel    <-chan utils.GotaFrame
+	s2rChannel    chan<- utils.GotaFrame
 	cancelChannel chan int
 	localAddrs    []string
 	//remoteAddr     string
 	workerPool []*TunnelWorker
 }
 
-func newTunnelManager(cid chan uint16, r2s chan dataFrame, s2r chan dataFrame, cancel chan int, localAddrs []string /*, remoteAddr string*/) *TunnelManager {
+func newTunnelManager(cid chan uint16, r2s chan utils.GotaFrame, s2r chan utils.GotaFrame, cancel chan int, localAddrs []string /*, remoteAddr string*/) *TunnelManager {
 	t := &TunnelManager{
 		connIdChannel: cid,
 		r2sChannel:    r2s,
@@ -258,7 +259,7 @@ func newTunnelManager(cid chan uint16, r2s chan dataFrame, s2r chan dataFrame, c
 
 func (t *TunnelManager) start() {
 	for _, lAddr := range t.localAddrs {
-		log.Infof("Create a tunnel work and local bind address IP: %s", lAddr /*, t.remoteAddr*/)
+		log.Infof("Create a tunnel worker and bind local address IP: %s", lAddr /*, t.remoteAddr*/)
 		heartbeat := make(chan int)
 		tw := &TunnelWorker{
 			localAddr: lAddr,
@@ -284,16 +285,16 @@ type TunnelWorker struct {
 	// create a new connection to remote
 	connIdChannel chan<- uint16
 	// read from client and s2c to server
-	r2sChannel <-chan dataFrame
+	r2sChannel <-chan utils.GotaFrame
 	// c2s from server and s2c to client
-	s2rChannel chan<- dataFrame
+	s2rChannel chan<- utils.GotaFrame
 	//retryTime int
 }
 
 func (tw *TunnelWorker) heartbeat() {
 	for {
 		select {
-		case <-time.After(time.Second * TMHeartBeatSecond):
+		case <-time.After(time.Second * utils.TMHeartBeatSecond):
 			tw.heartbeatChan <- 0
 			if tw.cancelFlag == -1 {
 				break
@@ -362,21 +363,21 @@ func (tw *TunnelWorker) s2c(done chan<- int, conn *net.TCPConn) {
 		select {
 		case d := <-tw.r2sChannel:
 			log.Debugf("Received data from remote: %+v", d)
-			n, err := conn.Write(wrapDataFrame(d))
+			n, err := conn.Write(utils.WrapDataFrame(d))
 			if err != nil {
 				panic(err)
 			}
-			log.Debugf("Write data frame to tunnel, length: %d", n)
+			log.Debugf("Wrote data frame to tunnel, length: %d", n)
 		case <-tw.cancelChannel:
 			log.Infof("Shutdown worker: %v", tw)
-			_, err := conn.Write(TMCloseTunnelBytes)
+			_, err := conn.Write(utils.TMCloseTunnelBytes)
 			if err != nil {
 				log.Fatalf("Send close signal failed duo to: %s", err)
 			}
 			//tw.cancelFlag = -1
 			return
 		case <-tw.heartbeatChan:
-			_, err := conn.Write(TMHeartBeatBytes)
+			_, err := conn.Write(utils.TMHeartBeatBytes)
 			if err != nil {
 				log.Errorf("Heartbeat failed duo to: %s", err)
 				//tw.cancelFlag = -1
@@ -412,22 +413,22 @@ func (tw *TunnelWorker) c2s(done chan<- int, conn *net.TCPConn) {
 			break
 		}
 
-		df := unWrapDataFrame(header)
+		df := utils.UnwrapDataFrame(header)
 		log.Debugf("Received data frame header from client: %+v", df)
 
 		if df.Length == 0 {
 			switch df.SeqNum {
-			case TMHeartBeatSeq:
+			case utils.TMHeartBeatSeq:
 				log.Debugf("Received heartbeat signal from client(%s) to server(%s)", conn.RemoteAddr(), conn.LocalAddr())
 				continue
-			case TMCloseConnSeq:
+			case utils.TMCloseConnSeq:
 				log.Debug("Received close connection signal")
 			// TODO close connection
-			case TMCreateConnSeq:
+			case utils.TMCreateConnSeq:
 				log.Debug("Received create connection signal")
 				tw.connIdChannel <- df.ConnId
 				continue
-			case TMCloseTunnelSeq:
+			case utils.TMCloseTunnelSeq:
 				log.Info("Receive close tunnel signal")
 			// TODO close tunnel
 			default:
@@ -436,13 +437,13 @@ func (tw *TunnelWorker) c2s(done chan<- int, conn *net.TCPConn) {
 			}
 		}
 
-		data := make([]byte, MaxDataLength)
+		data := make([]byte, df.Length)
 		n, err = conn.Read(data)
 		if (err != nil && err != io.EOF) || n != int(df.Length) {
 			log.Errorf("Data frame length mismatch, header: %+v", df)
 			panic(err)
 		}
-		df.data = data[:n]
+		df.Data = data[:n]
 		log.Debugf("Received data frame from client: %+v", df)
 		tw.s2rChannel <- df
 
@@ -452,120 +453,6 @@ func (tw *TunnelWorker) c2s(done chan<- int, conn *net.TCPConn) {
 			break
 		}
 	}
-}
-
-const MaxDataLength = 65536
-const MaxConnID = 65535
-
-// Connection Manage HeartBeat Time
-const TMHeartBeatSecond = 300
-
-// Magic data frame
-// when length == 0 the data frame is used for control the tunnels and connections
-//const TMHeartBeatString = "00000000"
-//const TMHeartBeatSeq = 0
-
-//const TMCloseConnString = "00000001"
-//const TMCloseConnSeq = 1
-
-//const TMCreateConnString = "00000002"
-//const TMCreateConnSeq = 2
-
-//const TMCloseTunnelString = "00000003"
-//const TMCloseTunnelSeq = 3
-
-const (
-	TMHeartBeatSeq = iota
-	TMCreateConnSeq
-	TMCreateConnOKSeq
-	TMCloseConnSeq
-	TMCloseConnOKSeq
-	TMCloseTunnelSeq
-)
-
-var TMHeartBeatBytes []byte
-var TMCloseTunnelBytes []byte
-
-func init() {
-	TMHeartBeatBytes = wrapDataFrame(dataFrame{
-		ConnId: uint16(0),
-		Length: uint16(0),
-		SeqNum: uint32(TMHeartBeatSeq),
-	})
-	TMCloseTunnelBytes = wrapDataFrame(dataFrame{
-		ConnId: uint16(0),
-		Length: uint16(0),
-		SeqNum: uint32(TMCloseTunnelSeq),
-	})
-}
-
-const (
-	TMConnBiuniqueMode = iota
-	TMConnOverlapMode
-	TMConnMultiBiuniqueMode
-	TMConnMultiOverlapMode
-)
-
-func wrapDataFrame(data dataFrame) []byte {
-	var buf bytes.Buffer
-
-	cid := make([]byte, 2)
-	binary.LittleEndian.PutUint16(cid, data.ConnId)
-	buf.Write(cid)
-
-	lens := make([]byte, 2)
-	binary.LittleEndian.PutUint16(lens, data.Length)
-	buf.Write(lens)
-
-	seq := make([]byte, 4)
-	binary.LittleEndian.PutUint32(seq, data.SeqNum)
-	buf.Write(seq)
-
-	buf.Write(data.data)
-	return buf.Bytes()
-}
-
-func unWrapDataFrame(h []byte) dataFrame {
-	cid := binary.LittleEndian.Uint16(h[:2])
-	lens := binary.LittleEndian.Uint16(h[2:4])
-	seq := binary.LittleEndian.Uint32(h[4:])
-	return dataFrame{
-		ConnId: cid,
-		Length: lens,
-		SeqNum: seq,
-	}
-	/*
-		cid, n := binary.Uvarint(h[:2])
-		if n <= 0 {
-			panic(fmt.Sprintf("Error Data Frame Header: %s", h))
-		}
-
-		len, n := binary.Uvarint(h[2:4])
-		if n <= 0 {
-			panic(fmt.Sprintf("Error Data Frame Header: %s", h))
-		}
-
-		seq, n := binary.Uvarint(h[4:])
-		if n <= 0 {
-			panic(fmt.Sprintf("Error Data Frame Header: %s", h))
-		}
-		return dataFrame{
-			uint16(cid),
-			uint16(len),
-			uint32(seq),
-			nil}
-	*/
-}
-
-// TODO client id for different tunnel group
-type dataFrame struct {
-	// Connection ID
-	ConnId uint16
-	// Data length
-	Length uint16
-	// Sequence number
-	SeqNum uint32
-	data   []byte
 }
 
 func main() {
@@ -584,11 +471,11 @@ func main() {
 	// TODO configuration
 	log.SetLevel(log.DebugLevel)
 	localAddr := "localhost:8080"
-	remoteAddr := "baidu.com:80"
+	remoteAddr := "10.64.68.111:80"
 
 	newconnIdChannel := make(chan uint16)
 
-	r2sChannel, s2rChannel := make(chan dataFrame), make(chan dataFrame)
+	r2sChannel, s2rChannel := make(chan utils.GotaFrame), make(chan utils.GotaFrame)
 	cm := newConnManager(newconnIdChannel, r2sChannel, s2rChannel, remoteAddr)
 	//cm := newConnManager(newconnIdChannel, s2rChannel, r2sChannel, remoteAddr)
 	go cm.handleConn()
