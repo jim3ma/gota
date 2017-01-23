@@ -290,6 +290,7 @@ func (t *TunnelManager) start() {
 		log.Error("Unknown Worker Mode")
 		panic("Unknown Worker Mode")
 	}
+
 	for _, lAddr := range t.localIPs {
 		for _, rAddr := range t.remoteAddrs {
 			log.Infof("Local IP address: %s, remote address: %s", lAddr, rAddr)
@@ -297,6 +298,7 @@ func (t *TunnelManager) start() {
 			tw := &TunnelWorker{
 				localAddr:     lAddr,
 				remoteAddr:    rAddr,
+				cancelled:     false,
 				cancelChannel: t.cancelChannel,
 				heartbeatChan: heartbeat,
 				x2cChannel:    t.x2cChannel,
@@ -308,11 +310,9 @@ func (t *TunnelManager) start() {
 }
 
 type TunnelWorker struct {
-	//SWokerPool chan *TunnelWorker
-	//RWokerPool chan *TunnelWorker
 	localAddr     string
 	remoteAddr    string
-	cancelFlag    int
+	cancelled     bool
 	cancelChannel chan int
 	heartbeatChan chan int
 	// read from client and c2s to server
@@ -320,33 +320,31 @@ type TunnelWorker struct {
 	// s2c from server and c2s to client
 	c2xChannel chan<- utils.GotaFrame
 	stat utils.Statistic
-	//conn *net.TCPConn
-	//retryTime int
 }
 
-func (tw *TunnelWorker) heartbeat() {
+func (tw *TunnelWorker) heartbeat(stop <-chan int) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Errorf("Heartbeat error: %s", r)
 			log.Errorf("Call stack: %s", debug.Stack())
-			go tw.heartbeat()
+			go tw.heartbeat(stop)
 		}
 	}()
-	//log.Info("Start to send heartbeat to server")
 	for {
 		select {
 		case <-time.After(time.Second * utils.TMHeartBeatSecond):
 			tw.heartbeatChan <- 0
-			if tw.cancelFlag == -1 {
-				log.Debug("Tunnel work was canneled")
+			if tw.cancelled == true {
+				log.Info("Tunnel work was canneled")
 				break
 			}
 		case <-time.After(time.Second * utils.TMStatReportSecond):
-			log.Infof("Traffic Report for client(%s) & server(%s): { sent: %s bytes, %s/second, received: %s bytes, %s/second }",
+			log.Infof("Traffic report for client(%s) & server(%s): { sent: %s bytes, %s/second, received: %s bytes, %s/second }",
 				tw.localAddr, tw.remoteAddr,
 				humanize.Comma(tw.stat.SentBytes), humanize.Comma(tw.stat.SendSpeed()),
 				humanize.Comma(tw.stat.ReceivedBytes), humanize.Comma(tw.stat.ReceiveSpeed()))
-			// TODO when cancel the tunnel worker, stop heartbeat
+		case <- stop:
+			log.Info("Reveived stop hearbeat signal, stopped")
 		}
 	}
 }
@@ -377,23 +375,24 @@ func (tw *TunnelWorker) start() {
 	}
 	defer conn.Close()
 
-	// update locate and remote addr
+	// update locate and remote address
 	tw.localAddr = conn.LocalAddr().String()
 	tw.remoteAddr = conn.RemoteAddr().String()
 
 	log.Debugf("Created a tunnel: %v to server: %v", conn.LocalAddr(), conn.RemoteAddr())
 
-	c2sDone, s2cDone := make(chan int), make(chan int)
-	go tw.heartbeat()
-	go tw.c2s(c2sDone, conn)
-	go tw.s2c(s2cDone, conn)
+	done, stopHeartbeat := make(chan int), make(chan int)
+	go tw.heartbeat(stopHeartbeat)
+	go tw.c2s(done, conn)
+	go tw.s2c(done, conn)
 	log.Infof("TunnelWorker start to forward traffic, local address: %s, remote address: %s", tw.localAddr, tw.remoteAddr)
-	<-c2sDone
-	<-s2cDone
+	<-done
+	<-done
+	stopHeartbeat <- 0
 }
 
 func (tw *TunnelWorker) restart() {
-	tw.cancelFlag = 0
+	tw.cancelled = false
 	go tw.start()
 }
 
@@ -404,7 +403,7 @@ func (tw *TunnelWorker) c2s(done chan<- int, conn *net.TCPConn) {
 			log.Errorf("Runtime error caught: %v, runtime info: %s", r, utils.GoRuntimeInfo())
 			log.Errorf("Call stack: %s", debug.Stack())
 		}
-		tw.cancelFlag = -1
+		tw.cancelled = true
 		done <- 0
 	}()
 
@@ -412,10 +411,6 @@ func (tw *TunnelWorker) c2s(done chan<- int, conn *net.TCPConn) {
 	for {
 		select {
 		case d := <-tw.x2cChannel:
-			//n, err := conn.Write(utils.WrapDataFrame(d))
-			//if err != nil || n < 8 {
-			//	panic(err)
-			//}
 			err := utils.WriteNBytes(conn, int(d.Length) + 8, utils.WrapDataFrame(d))
 			if err != nil {
 				panic(err)
@@ -429,14 +424,12 @@ func (tw *TunnelWorker) c2s(done chan<- int, conn *net.TCPConn) {
 			if err != nil {
 				log.Fatalf("Send Close Signal failed duo to: %s", err)
 			}
-			//tw.cancelFlag = -1
 			return
 		case <-tw.heartbeatChan:
 			_, err := conn.Write(utils.TMHeartBeatBytes)
 			log.Debugf("Sent heartbeat to server(%s) from client(%s)", conn.RemoteAddr(), conn.LocalAddr())
 			if err != nil {
 				log.Errorf("HeartBeat failed duo to: %s, stop this worker", err)
-				//tw.cancelFlag = -1
 				return
 			}
 		}
@@ -461,6 +454,7 @@ func (tw *TunnelWorker) s2c(done chan<- int, conn *net.TCPConn) {
 			log.Debug("Receive empth data, skip and continue")
 			continue
 		} else if err != io.EOF && (err != nil || n != 8) {
+			// TODO
 			log.Error("Received data frame header error")
 			//panic(err)
 		}
@@ -498,21 +492,6 @@ func (tw *TunnelWorker) s2c(done chan<- int, conn *net.TCPConn) {
 			}
 		}
 
-		/*var buf bytes.Buffer
-		for remain := df.Length; remain > 0; {
-			data := make([]byte, remain)
-			n, err = conn.Read(data)
-
-			// TODO error handle
-			if err != nil {
-				panic(err)
-			}
-			remain = remain - uint16(n)
-			buf.Write(data[:n])
-		}
-
-		df.Data = buf.Bytes()*/
-
 		df.Data, err = utils.ReadNBytes(conn, int(df.Length))
 		if err != nil {
 			panic(err)
@@ -521,9 +500,7 @@ func (tw *TunnelWorker) s2c(done chan<- int, conn *net.TCPConn) {
 		tw.stat.AddReceivedBytes(int64(n))
 		tw.c2xChannel <- df
 
-		if tw.cancelFlag == -1 || err == io.EOF {
-			// reset cancelFlag flag
-			tw.cancelFlag = 0
+		if tw.cancelled == true || err == io.EOF {
 			break
 		}
 	}
