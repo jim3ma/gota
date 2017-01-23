@@ -387,7 +387,7 @@ func (tw *TunnelWorker) s2c(done chan<- int, conn *net.TCPConn) {
 	for {
 		select {
 		case d := <-tw.r2sChannel:
-			log.Debugf("Received data from remote: %+v", d)
+			log.Debugf("Received data from remote: %s", d)
 			//n, err := conn.Write(utils.WrapDataFrame(d))
 			err := utils.WriteNBytes(conn, int(d.Length) + 8, utils.WrapDataFrame(d))
 			if err != nil {
@@ -441,7 +441,7 @@ func (tw *TunnelWorker) c2s(done chan<- int, conn *net.TCPConn) {
 		}
 
 		df := utils.UnwrapDataFrame(header)
-		log.Debugf("Received data frame header from client: %+v", df)
+		log.Debugf("Received data frame header from client: %s", df)
 
 		if df.Length == 0 {
 			switch df.SeqNum {
@@ -470,7 +470,7 @@ func (tw *TunnelWorker) c2s(done chan<- int, conn *net.TCPConn) {
 			panic(err)
 		}
 
-		log.Debugf("Received data frame from client: %+v", df)
+		log.Debugf("Received data frame from client: %s", df)
 		tw.s2rChannel <- df
 
 		if tw.cancelFlag == -1 || err == io.EOF {
