@@ -4,7 +4,7 @@ import (
 	"time"
 	"bytes"
 	"net"
-	"fmt"
+	//"fmt"
 )
 
 // Statistic contains the traffic status
@@ -51,7 +51,6 @@ func ReadNBytes(conn *net.TCPConn, n int) ([]byte, error){
 
 func WriteNBytes(conn *net.TCPConn, n int, d []byte) error{
 	for wrote := 0; wrote < n; {
-		fmt.Printf("w: %d", wrote)
 		wn, err := conn.Write(d[wrote:])
 		if err != nil {
 			return err

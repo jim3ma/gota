@@ -3,6 +3,7 @@ package utils
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 )
 
 // GotaFrame
@@ -19,6 +20,17 @@ type GotaFrame struct {
 	Data   []byte
 }
 
+func (gf GotaFrame) String() string {
+	if gf.Length > GotaFrameDebugDataLength && len(gf.Data) > 0 {
+		return fmt.Sprintf("\n{\n  ConnId: %d, \n  SeqNum: %d, \n  Length: %d, \n  Data(%d of %d bytes): \n    %+v\n}",
+			gf.ConnId, gf.SeqNum, gf.Length, GotaFrameDebugDataLength,
+			gf.Length, gf.Data[:GotaFrameDebugDataLength] )
+	}
+	return fmt.Sprintf("\n{\n  ConnId: %d, \n  SeqNum: %d, \n  Length: %d, \n  Data  : %+v\n}",
+			gf.ConnId, gf.SeqNum, gf.Length, gf.Data)
+}
+
+const GotaFrameDebugDataLength = 256
 
 const MaxDataLength = 32 * 1024
 const MaxConnID = 64 * 1024 - 1

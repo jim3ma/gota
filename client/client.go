@@ -82,7 +82,7 @@ func (c *ConnManager) handleConn() {
 // s2c from c2xChannel and forward to special s2c channel according the connection ID
 func (c *ConnManager) dispatch() {
 	for d := range c.c2xChannel {
-		log.Debugf("Received data from tunnel: %+v", d)
+		log.Debugf("Received data from tunnel: %s", d)
 		if ch, ok := c.connectionPool[d.ConnId]; ok {
 			ch.c2xChannel <- d
 		} else {
@@ -204,24 +204,26 @@ func (ch *ConnHandler) c2x() {
 				return
 			}
 		}
-		log.Debugf("Received from tunnel, data frame: %+v", d)
 		if d.SeqNum == seq {
-			_, err := ch.conn.Write(d.Data)
+			log.Debugf("Received wanted data frame seq from tunnel: %d", seq)
+			//_, err := ch.conn.Write(d.Data)
+			err := utils.WriteNBytes(ch.conn, int(d.Length), d.Data)
 			if err != nil && err != io.EOF {
 				panic(err)
 			}
 			if err == io.EOF {
 				return
 			}
-			seq += 1
 
+			seq += 1
 			if len(cache) == 0 {
 				continue
 			}
-			// TODO check cache and send to client
+			// check cache and send to client
 			for {
 				if data, ok := cache[seq]; ok {
-					_, err := ch.conn.Write(data)
+					//_, err := ch.conn.Write(data)
+					err := utils.WriteNBytes(ch.conn, len(data), data)
 					if err != nil && err != io.EOF {
 						panic(err)
 					}
@@ -235,9 +237,12 @@ func (ch *ConnHandler) c2x() {
 				}
 			}
 		} else if d.SeqNum > seq {
-			// TODO cache for disorder data frame
-			log.Debugf("Want to receive data frame seq: %d, but received seq: %d", seq, d.SeqNum)
+			// cache for disorder data frame
+			log.Debugf("Received data frame seq from tunnel: %d, but want to receive data frame seq: %d, cache it",
+				d.SeqNum, seq)
 			cache[d.SeqNum] = d.Data
+		} else {
+			log.Warnf("Received data frame seq from tunnel: %d, but the data frame already send to x, dropped", d.SeqNum)
 		}
 	}
 }
@@ -417,7 +422,7 @@ func (tw *TunnelWorker) c2s(done chan<- int, conn *net.TCPConn) {
 			}
 			tw.stat.AddSentBytes(int64(d.Length))
 			log.Debugf("Wrote %d bytes", d.Length)
-			log.Debugf("Received data frame from x, send to server, data: %+v", d)
+			log.Debugf("Received data frame from x, send to server, data: %s", d)
 		case <-tw.cancelChannel:
 			log.Infof("Shutdown Worker: %v", tw)
 			_, err := conn.Write(utils.TMCloseTunnelBytes)
@@ -465,7 +470,7 @@ func (tw *TunnelWorker) s2c(done chan<- int, conn *net.TCPConn) {
 			break
 		}
 		df := utils.UnwrapDataFrame(header)
-		log.Debugf("Received data frame header from server: %+v", df)
+		log.Debugf("Received data frame header from server: %s", df)
 
 		if df.Length == 0 {
 			switch df.SeqNum {
@@ -560,7 +565,9 @@ func main() {
 
 	cancelChannel := make(chan int)
 	//tm := newTunnelManager(x2cChannel, c2xChannel, cancelChannel, TMConnBiuniqueMode, []string{"127.0.0.1", "127.0.0.1"}, []string{"127.0.0.1:8080", "127.0.0.1:8080"})
-	tm := newTunnelManager(x2cChannel, c2xChannel, cancelChannel, utils.TMConnBiuniqueMode, []string{ "127.0.0.1"}, []string{"127.0.0.1:8080"})
+	tm := newTunnelManager(x2cChannel, c2xChannel, cancelChannel, utils.TMConnBiuniqueMode,
+		[]string{ "192.168.91.128", "192.168.91.128", "192.168.91.128", "192.168.91.128"},
+		[]string{"10.202.240.252:8080", "10.202.240.252:8080", "10.202.240.252:8080", "10.202.240.252:8080"})
 	//tm := newTunnelManager(x2cChannel, c2xChannel, cancelChannel, utils.TMConnBiuniqueMode, []string{"192.168.91.128"}, []string{"192.168.91.128:8080"})
 	go tm.start()
 

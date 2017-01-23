@@ -211,11 +211,13 @@ func (ch *ConnHandler) s2r() {
 			}
 		}
 		if d.SeqNum == seq {
-			n, err := ch.conn.Write(d.Data)
+			log.Debugf("Received wanted data frame seq from tunnel: %d,", seq)
+			//n, err := ch.conn.Write(d.Data)
+			err := utils.WriteNBytes(ch.conn, int(d.Length), d.Data)
 			if err != nil && err != io.EOF {
 				panic(err)
 			}
-			log.Debugf("Wrote data to remote, connection id: %d, seq: %d, length: %d, wrote length: %d", d.ConnId, d.SeqNum, d.Length, n)
+			log.Debugf("Wrote data to remote, connection id: %d, seq: %d, length: %d", d.ConnId, d.SeqNum, d.Length)
 			if err == io.EOF {
 				break
 			}
@@ -224,10 +226,11 @@ func (ch *ConnHandler) s2r() {
 			if len(cache) == 0 {
 				continue
 			}
-			// TODO check cache and s2c to client
+			// check cache and send to remote
 			for {
 				if data, ok := cache[seq]; ok {
-					_, err := ch.conn.Write(data)
+					//_, err := ch.conn.Write(data)
+					err := utils.WriteNBytes(ch.conn, len(data), data)
 					if err != nil && err != io.EOF {
 						panic(err)
 					}
@@ -241,8 +244,12 @@ func (ch *ConnHandler) s2r() {
 				}
 			}
 		} else if d.SeqNum > seq {
-			// TODO cache for disorder data frame
+			// disorder seq, cache it
+			log.Debugf("Received data frame seq from tunnel: %d, but want to receive data frame seq: %d, cache it",
+				d.SeqNum, seq)
 			cache[d.SeqNum] = d.Data
+		} else {
+			log.Warnf("Received data frame seq from tunnel: %d, but the data frame already send to x", d.SeqNum)
 		}
 	}
 }
