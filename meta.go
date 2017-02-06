@@ -30,7 +30,7 @@ type GotaFrame struct {
 	// Data length
 	Length int
 	// Data
-	Data   []byte
+	Payload   []byte
 }
 
 // String for logging
@@ -65,7 +65,7 @@ func (gf *GotaFrame) MarshalBinary() (data []byte, err error) {
 	binary.LittleEndian.PutUint16(lens, l)
 	buf.Write(lens)
 
-	buf.Write(gf.Data)
+	buf.Write(gf.Payload)
 	data = buf.Bytes()
 	return
 }
@@ -102,8 +102,8 @@ func (gf *GotaFrame) UnmarshalBinary(data []byte) error {
 	} else if gf.Control {
 		return nil
 	}
-	gf.Data = data[10:]
-	if len(gf.Data) != gf.Length {
+	gf.Payload = data[10:]
+	if len(gf.Payload) != gf.Length {
 		return ErrUnmatchedDataLength
 	}
 	return nil
@@ -162,7 +162,7 @@ func WrapGotaFrame(data *GotaFrame) []byte {
 	binary.LittleEndian.PutUint16(lens, l)
 	buf.Write(lens)
 
-	buf.Write(data.Data)
+	buf.Write(data.Payload)
 	return buf.Bytes()
 }
 

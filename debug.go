@@ -4,6 +4,8 @@ import (
 	"runtime"
 	"fmt"
 	"path/filepath"
+	log "github.com/Sirupsen/logrus"
+	"runtime/debug"
 )
 
 // RuntimeInfo return a string containing the file name, function name
@@ -44,4 +46,11 @@ func GoFileLine() int {
 func GoFuncName() string {
 	f, _, _, _ := runtime.Caller(callerSkip)
 	return runtime.FuncForPC(f).Name()
+}
+
+func Recover() {
+	if r := recover(); r != nil {
+		log.Errorf("Runtime error caught: %v, runtime info: %s", r, RuntimeInfo(2))
+		log.Errorf("Call stack: %s", debug.Stack())
+	}
 }
