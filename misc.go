@@ -1,4 +1,4 @@
-package utils
+package gota
 
 import (
 	"bytes"
@@ -59,4 +59,15 @@ func WriteNBytes(w io.Writer, n int, d []byte) error{
 		wrote = wrote + wn
 	}
 	return nil
+}
+
+type RWCloseWriter interface {
+	CloseWrite() error
+	io.ReadWriteCloser
+}
+
+
+type RWCloseReader interface {
+	CloseRead() error
+	io.ReadWriteCloser
 }

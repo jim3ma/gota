@@ -1,4 +1,4 @@
-package utils
+package gota
 
 import (
 	"bufio"
@@ -117,27 +117,4 @@ func FromEnvironment() proxy.Dialer {
 func init() {
 	proxy.RegisterDialerType("http", newHTTPProxy)
 	proxy.RegisterDialerType("https", newHTTPProxy)
-}
-
-func main() {
-	// http proxy
-	httpProxyURI, _ := url.Parse("http://your http proxy:3128")
-	httpDialer, err := proxy.FromURL(httpProxyURI, Direct)
-
-	conn, err := httpDialer.Dial("tcp", "google.com:80")
-	if err != nil {
-		panic(err)
-	}
-	fmt.Printf("Create http tunnel OK: %+v\n", conn)
-
-	httpsProxyURI, _ := url.Parse("https://your https proxy:443")
-	httpsDialer, err := proxy.FromURL(httpsProxyURI, HttpsDialer)
-
-	conn, err = httpsDialer.Dial("tcp", "google.com:443")
-	if err != nil {
-		panic(err)
-	}
-	fmt.Printf("Create https tunnel OK: %+v\n", conn)
-
-	// TODO use conn
 }

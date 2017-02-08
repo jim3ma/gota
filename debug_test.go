@@ -1,4 +1,4 @@
-package utils
+package gota
 
 import (
 	"testing"
@@ -8,5 +8,5 @@ import (
 // go test with -v to show all logs
 func TestRecover(t *testing.T) {
 	defer Recover()
-	panic(errors.New("TestRecover Error"))
+	panic(errors.New("\"TestRecover Error\""))
 }

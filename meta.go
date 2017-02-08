@@ -10,6 +10,7 @@ import (
 // GotaFrame struct
 //
 // First bit is Control flag, 1 for control, 0 for normal
+// when control flag is 1, length must be 0
 // ┏━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 // ┃ 1 bit ┃    connection id: 31 bit      ┃ 4 bytes, 1 bit for control flag, and 31 bit for connection id
 // ┣━━━━━━━┻━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫
@@ -35,7 +36,7 @@ type GotaFrame struct {
 
 // String for logging
 func (gf GotaFrame) String() string {
-	return fmt.Sprintf("{ ConnId: %d, SeqNum: %d, Length: %d }", gf.ConnId, gf.SeqNum, gf.Length)
+	return fmt.Sprintf("{ Control: %v, ConnId: %d, SeqNum: %d, Length: %d }", gf.Control, gf.ConnId, gf.SeqNum, gf.Length)
 }
 
 // IsControl return if this frame is a control type
@@ -48,7 +49,11 @@ func (gf *GotaFrame) MarshalBinary() (data []byte, err error) {
 	var buf bytes.Buffer
 
 	cid := make([]byte, 4)
-	binary.LittleEndian.PutUint32(cid, gf.ConnId)
+	if gf.Control {
+		binary.LittleEndian.PutUint32(cid, gf.ConnId + ControlFlagBit)
+	} else {
+		binary.LittleEndian.PutUint32(cid, gf.ConnId)
+	}
 	buf.Write(cid)
 
 	seq := make([]byte, 4)
@@ -73,7 +78,7 @@ func (gf *GotaFrame) MarshalBinary() (data []byte, err error) {
 // TODO
 func (gf *GotaFrame) UnmarshalBinary(data []byte) error {
 	if len(data) < HeaderLength {
-		return ErrInsufficentData
+		return ErrInsufficientData
 	}
 
 	cid := binary.LittleEndian.Uint32(data[:4])
@@ -82,12 +87,12 @@ func (gf *GotaFrame) UnmarshalBinary(data []byte) error {
 	var lenx int
 
 	var ctrl bool
-	if cid & ControlFlagBit {
+	if (cid & ControlFlagBit) != 0 {
 		ctrl = true
-		cid -= ControlFlagBit
+		cid = cid - ControlFlagBit
 	}
 
-	if lens == 0 {
+	if lens == 0 && ctrl == false {
 		lenx = MaxDataLength
 	} else {
 		lenx = int(lens)
@@ -138,71 +143,31 @@ var TMCloseTunnelBytes []byte
 
 const HeaderLength = 10
 var HeaderOnly = errors.New("Gota Header Only")
-var ErrInsufficentData = errors.New("Error Header, Insufficent Data for GotaFrame Header")
+var ErrInsufficientData = errors.New("Error Header, Insufficent Data for GotaFrame Header")
 var ErrUnmatchedDataLength = errors.New("Unmatched Data Length for GotaFrame")
 
-func WrapGotaFrame(data *GotaFrame) []byte {
-	var buf bytes.Buffer
-
-	cid := make([]byte, 4)
-	binary.LittleEndian.PutUint32(cid, data.ConnId)
-	buf.Write(cid)
-
-	seq := make([]byte, 4)
-	binary.LittleEndian.PutUint32(seq, data.SeqNum)
-	buf.Write(seq)
-
-	var l uint16
-	if data.Length == MaxDataLength {
-		l = 0
-	} else {
-		l = uint16(data.Length)
-	}
-	lens := make([]byte, 2)
-	binary.LittleEndian.PutUint16(lens, l)
-	buf.Write(lens)
-
-	buf.Write(data.Payload)
-	return buf.Bytes()
+func WrapGotaFrame(gf *GotaFrame) []byte {
+	b, _ := gf.MarshalBinary()
+	return b
 }
 
-func UnwrapGotaFrame(h []byte) *GotaFrame {
-	cid := binary.LittleEndian.Uint32(h[:4])
-	seq := binary.LittleEndian.Uint32(h[4:8])
-	lens := binary.LittleEndian.Uint16(h[8:])
-	var lenx int
-
-	var ctrl bool
-	if cid & ControlFlagBit {
-		ctrl = true
-		cid -= ControlFlagBit
-	}
-
-	if lens == 0 {
-		lenx = MaxDataLength
-	} else {
-		lenx = int(lens)
-	}
-
-	return &GotaFrame{
-		Control: ctrl,
-		ConnId:  cid,
-		Length:  lenx,
-		SeqNum:  seq,
-	}
+func UnwrapGotaFrame(data []byte) *GotaFrame {
+	var gf GotaFrame
+	gf.UnmarshalBinary(data)
+	return &gf
 }
 
 func init() {
 	TMHeartBeatBytes = WrapGotaFrame(&GotaFrame{
 		Control: true,
-		ConnId: uint32(0),
-		Length: 0,
-		SeqNum: uint32(TMHeartBeatSeq),
+		ConnId:  uint32(0),
+		Length:  0,
+		SeqNum:  uint32(TMHeartBeatSeq),
 	})
 	TMCloseTunnelBytes = WrapGotaFrame(&GotaFrame{
 		Control: true,
-		ConnId: uint32(0),
-		Length: 0,
-		SeqNum: uint32(TMCloseTunnelSeq),
+		ConnId:  uint32(0),
+		Length:  0,
+		SeqNum:  uint32(TMCloseTunnelSeq),
 	})
 }
