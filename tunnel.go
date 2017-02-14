@@ -41,7 +41,8 @@ func (tm *TunnelManager) writeDispatch(){
 type TunnelTransport struct {
 	mode int
 
-	quit chan bool
+	ClientID uint32
+	quit chan struct{}
 
 	mu sync.Locker
 	quitted bool

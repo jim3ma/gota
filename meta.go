@@ -22,9 +22,11 @@ import (
 // ┃                   ...                 ┃
 
 type GotaFrame struct {
+	// client ID, only used internal
+	clientID uint32
 	// Control
 	Control bool
-	// Connection ID, when ConnId > (1 << 31), this frame is a control frame
+	// Connection ID, when ConnID > (1 << 31), this frame is a control frame
 	ConnId uint32
 	// Sequence number, when this frame is a control frame, SeqNum will be used from control
 	SeqNum uint32
@@ -36,7 +38,7 @@ type GotaFrame struct {
 
 // String for logging
 func (gf GotaFrame) String() string {
-	return fmt.Sprintf("{ Control: %v, ConnId: %d, SeqNum: %d, Length: %d }", gf.Control, gf.ConnId, gf.SeqNum, gf.Length)
+	return fmt.Sprintf("{ Control: %v, ConnID: %d, SeqNum: %d, Length: %d }", gf.Control, gf.ConnId, gf.SeqNum, gf.Length)
 }
 
 // IsControl return if this frame is a control type
@@ -44,7 +46,7 @@ func (gf GotaFrame) IsControl() bool {
 	return gf.Control
 }
 
-// TODO
+// MarshalBinary generates GotaFrame to bytes
 func (gf *GotaFrame) MarshalBinary() (data []byte, err error) {
 	var buf bytes.Buffer
 
@@ -75,7 +77,7 @@ func (gf *GotaFrame) MarshalBinary() (data []byte, err error) {
 	return
 }
 
-// TODO
+// UnmarshalBinary parses from bytes and sets up GotaFrame
 func (gf *GotaFrame) UnmarshalBinary(data []byte) error {
 	if len(data) < HeaderLength {
 		return ErrInsufficientData

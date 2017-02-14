@@ -1,6 +1,9 @@
 package gota
 
-import "testing"
+import (
+	"testing"
+	"bytes"
+)
 
 func TestGotaFrame_IsControl(t *testing.T) {
 	gf := &GotaFrame{
@@ -19,6 +22,7 @@ func TestGotaFrame_IsControl(t *testing.T) {
 }
 
 func TestGotaFrame_MarshalBinary(t *testing.T) {
+	output := []byte{0,0,0,0, 1,0,0,0, 2,0, 48,48}
 	buf := []byte("00")
 	gf := &GotaFrame{
 		Control: false,
@@ -31,11 +35,16 @@ func TestGotaFrame_MarshalBinary(t *testing.T) {
 	if err != nil {
 		t.Errorf("MarshalBinary Error: %s", err)
 	}
+
+	if bytes.Compare(data, output) != 0{
+		t.Errorf("MarshalBinary Error: mismatch bytes")
+	}
+
 	t.Logf("Marshal data: %+v", data)
 }
 
 func TestGotaFrame_UnmarshalBinary(t *testing.T) {
-	buf := []byte{0,0,0,0,0,0,0,0,0,0}
+	buf := []byte{0,0,0,0, 0,0,0,0, 0,0}
 	t.Logf("Test data bytes: %+v", buf)
 	var gf GotaFrame
 	err := gf.UnmarshalBinary(buf)
