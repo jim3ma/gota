@@ -1,8 +1,8 @@
 package gota
 
 import (
-	"testing"
 	"errors"
+	"testing"
 )
 
 // go test with -v to show all logs

@@ -2,11 +2,11 @@ package gota
 
 import (
 	"bufio"
+	"crypto/tls"
 	"fmt"
 	"net"
 	"net/http"
 	"net/url"
-	"crypto/tls"
 
 	"golang.org/x/net/proxy"
 )
@@ -21,7 +21,7 @@ func (direct) Dial(network, addr string) (net.Conn, error) {
 }
 
 // httpsDialer
-type httpsDialer struct {}
+type httpsDialer struct{}
 
 // HTTPSDialer is a https proxy: one that makes network connections on tls.
 var HttpsDialer = httpsDialer{}
@@ -89,7 +89,7 @@ func (s *httpProxy) Dial(network, addr string) (net.Conn, error) {
 		return nil, err
 	}
 
-        resp, err := http.ReadResponse(bufio.NewReader(c), req)
+	resp, err := http.ReadResponse(bufio.NewReader(c), req)
 	if err != nil {
 		// TODO close resp body ?
 		resp.Body.Close()
@@ -106,7 +106,7 @@ func (s *httpProxy) Dial(network, addr string) (net.Conn, error) {
 	return c, nil
 }
 
-func FromURL(u *url.URL, forward proxy.Dialer) (proxy.Dialer, error){
+func FromURL(u *url.URL, forward proxy.Dialer) (proxy.Dialer, error) {
 	return proxy.FromURL(u, forward)
 }
 

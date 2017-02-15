@@ -1,10 +1,10 @@
 package gota
 
 import (
-	"runtime"
 	"fmt"
-	"path/filepath"
 	log "github.com/Sirupsen/logrus"
+	"path/filepath"
+	"runtime"
 	"runtime/debug"
 )
 
@@ -22,7 +22,7 @@ func RuntimeInfo(depthList ...int) string {
 	return fmt.Sprintf("(File: %s, Line: %d, Function: %s)", filepath.Base(file), line, runtime.FuncForPC(function).Name())
 }
 
-const callerSkip  = 1
+const callerSkip = 1
 
 // GoFileName return the file name
 func GoFileName() string {

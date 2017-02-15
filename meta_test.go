@@ -1,15 +1,15 @@
 package gota
 
 import (
-	"testing"
 	"bytes"
+	"testing"
 )
 
 func TestGotaFrame_IsControl(t *testing.T) {
 	gf := &GotaFrame{
 		Control: true,
 	}
-	if ! gf.IsControl() {
+	if !gf.IsControl() {
 		t.Error("IsControl func return false, should return true")
 	}
 
@@ -22,12 +22,12 @@ func TestGotaFrame_IsControl(t *testing.T) {
 }
 
 func TestGotaFrame_MarshalBinary(t *testing.T) {
-	output := []byte{0,0,0,0, 1,0,0,0, 2,0, 48,48}
+	output := []byte{0, 0, 0, 0, 1, 0, 0, 0, 2, 0, 48, 48}
 	buf := []byte("00")
 	gf := &GotaFrame{
 		Control: false,
-		SeqNum: 1,
-		Length: 2,
+		SeqNum:  1,
+		Length:  2,
 		Payload: buf,
 	}
 	t.Logf("GotaFrame: %+v", gf)
@@ -36,7 +36,7 @@ func TestGotaFrame_MarshalBinary(t *testing.T) {
 		t.Errorf("MarshalBinary Error: %s", err)
 	}
 
-	if bytes.Compare(data, output) != 0{
+	if bytes.Compare(data, output) != 0 {
 		t.Errorf("MarshalBinary Error: mismatch bytes")
 	}
 
@@ -44,7 +44,7 @@ func TestGotaFrame_MarshalBinary(t *testing.T) {
 }
 
 func TestGotaFrame_UnmarshalBinary(t *testing.T) {
-	buf := []byte{0,0,0,0, 0,0,0,0, 0,0}
+	buf := []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 	t.Logf("Test data bytes: %+v", buf)
 	var gf GotaFrame
 	err := gf.UnmarshalBinary(buf)
@@ -59,7 +59,7 @@ func TestTMHeartBeatBytes(t *testing.T) {
 	gf.UnmarshalBinary(TMHeartBeatBytes)
 
 	t.Logf("GotaFrame: %+v", gf)
-	if gf.ConnId == 0 && gf.Control && gf.Length == 0 && gf.SeqNum == TMHeartBeatSeq {
+	if gf.ConnID == 0 && gf.Control && gf.Length == 0 && gf.SeqNum == TMHeartBeatSeq {
 		t.Logf("Correct heartbeat bytes: %+v", TMHeartBeatBytes)
 		return
 	}

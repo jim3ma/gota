@@ -27,18 +27,18 @@ type GotaFrame struct {
 	// Control
 	Control bool
 	// Connection ID, when ConnID > (1 << 31), this frame is a control frame
-	ConnId uint32
+	ConnID uint32
 	// Sequence number, when this frame is a control frame, SeqNum will be used from control
 	SeqNum uint32
 	// Data length
 	Length int
 	// Data
-	Payload   []byte
+	Payload []byte
 }
 
 // String for logging
 func (gf GotaFrame) String() string {
-	return fmt.Sprintf("{ Control: %v, ConnID: %d, SeqNum: %d, Length: %d }", gf.Control, gf.ConnId, gf.SeqNum, gf.Length)
+	return fmt.Sprintf("{ Control: %v, ConnID: %d, SeqNum: %d, Length: %d }", gf.Control, gf.ConnID, gf.SeqNum, gf.Length)
 }
 
 // IsControl return if this frame is a control type
@@ -52,9 +52,9 @@ func (gf *GotaFrame) MarshalBinary() (data []byte, err error) {
 
 	cid := make([]byte, 4)
 	if gf.Control {
-		binary.LittleEndian.PutUint32(cid, gf.ConnId + ControlFlagBit)
+		binary.LittleEndian.PutUint32(cid, gf.ConnID+ControlFlagBit)
 	} else {
-		binary.LittleEndian.PutUint32(cid, gf.ConnId)
+		binary.LittleEndian.PutUint32(cid, gf.ConnID)
 	}
 	buf.Write(cid)
 
@@ -101,10 +101,10 @@ func (gf *GotaFrame) UnmarshalBinary(data []byte) error {
 	}
 	gf.Control = ctrl
 	gf.Length = lenx
-	gf.ConnId = cid
+	gf.ConnID = cid
 	gf.SeqNum = seq
 
-	if ! gf.Control && len(data) == HeaderLength {
+	if !gf.Control && len(data) == HeaderLength {
 		return HeaderOnly
 	} else if gf.Control {
 		return nil
@@ -116,8 +116,8 @@ func (gf *GotaFrame) UnmarshalBinary(data []byte) error {
 	return nil
 }
 
-const MaxDataLength  = 64 * 1024
-const MaxConnID      = 1 << 31 - 1
+const MaxDataLength = 64 * 1024
+const MaxConnID = 1<<31 - 1
 const ControlFlagBit = 1 << 31
 
 // Connection Manage HeartBeat Time
@@ -144,6 +144,7 @@ var TMHeartBeatBytes []byte
 var TMCloseTunnelBytes []byte
 
 const HeaderLength = 10
+
 var HeaderOnly = errors.New("Gota Header Only")
 var ErrInsufficientData = errors.New("Error Header, Insufficent Data for GotaFrame Header")
 var ErrUnmatchedDataLength = errors.New("Unmatched Data Length for GotaFrame")
@@ -162,13 +163,13 @@ func UnwrapGotaFrame(data []byte) *GotaFrame {
 func init() {
 	TMHeartBeatBytes = WrapGotaFrame(&GotaFrame{
 		Control: true,
-		ConnId:  uint32(0),
+		ConnID:  uint32(0),
 		Length:  0,
 		SeqNum:  uint32(TMHeartBeatSeq),
 	})
 	TMCloseTunnelBytes = WrapGotaFrame(&GotaFrame{
 		Control: true,
-		ConnId:  uint32(0),
+		ConnID:  uint32(0),
 		Length:  0,
 		SeqNum:  uint32(TMCloseTunnelSeq),
 	})

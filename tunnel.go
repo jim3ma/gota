@@ -1,38 +1,38 @@
 package gota
 
 import (
-	"io"
 	log "github.com/Sirupsen/logrus"
+	"io"
 	"sync"
 )
 
 type TunnelManager struct {
-	readPool chan chan *GotaFrame
+	readPool  chan chan *GotaFrame
 	writePool chan chan *GotaFrame
 }
 
-func (tm *TunnelManager) start(){
+func (tm *TunnelManager) start() {
 
 }
 
-func (tm *TunnelManager) dispatch(){
+func (tm *TunnelManager) dispatch() {
 
 }
 
-func (tm *TunnelManager) readDispatch(){
+func (tm *TunnelManager) readDispatch() {
 	for {
 		select {
-		case c := <- tm.readPool:
-			<- c
+		case c := <-tm.readPool:
+			<-c
 		}
 	}
 }
 
-func (tm *TunnelManager) writeDispatch(){
+func (tm *TunnelManager) writeDispatch() {
 	for {
 		select {
-		case c := <- tm.writePool:
-			<- c
+		case c := <-tm.writePool:
+			<-c
 		}
 	}
 
@@ -42,15 +42,15 @@ type TunnelTransport struct {
 	mode int
 
 	ClientID uint32
-	quit chan struct{}
+	quit     chan struct{}
 
-	mu sync.Locker
+	mu      sync.Locker
 	quitted bool
 
-	readPool chan<- chan *GotaFrame
+	readPool    chan<- chan *GotaFrame
 	readChannel chan *GotaFrame
 
-	writePool chan<- chan *GotaFrame
+	writePool    chan<- chan *GotaFrame
 	writeChannel chan *GotaFrame
 
 	rw io.ReadWriteCloser
@@ -92,7 +92,7 @@ func (t *TunnelTransport) readFromTunnel() {
 		t.readPool <- t.readChannel
 		select {
 		case t.readChannel <- &gf:
-		case <- t.quit:
+		case <-t.quit:
 			return
 		}
 	}
@@ -107,28 +107,28 @@ func (t *TunnelTransport) writeToTunnel() {
 		t.writePool <- t.writeChannel
 
 		select {
-		case data := <- t.writeChannel:
-		// we have received a write request.
+		case data := <-t.writeChannel:
+			// we have received a write request.
 			rawBytes, err := data.MarshalBinary()
 			if err != nil && nil != HeaderOnly {
 				log.Errorf("Marshal GotaFrame error: %+v", err)
 			}
-			err = WriteNBytes(t.rw, data.Length + HeaderLength, rawBytes)
+			err = WriteNBytes(t.rw, data.Length+HeaderLength, rawBytes)
 			if err != nil && nil != io.EOF {
 				// TODO
 			}
 		case <-t.quit:
-		// received a signal to stop
+			// received a signal to stop
 			return
 		}
 	}
 }
 
-func (t *TunnelTransport) ListenAndServe(){
+func (t *TunnelTransport) ListenAndServe() {
 
 }
 
-func (t *TunnelTransport) ConnectAndServe(){
+func (t *TunnelTransport) ConnectAndServe() {
 
 }
 
@@ -155,7 +155,7 @@ func (t *TunnelTransport) Close() error {
 
 	defer Recover()
 
-	if ! t.quitted {
+	if !t.quitted {
 		t.quitted = true
 		close(t.readChannel)
 		close(t.writeChannel)

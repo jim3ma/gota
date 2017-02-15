@@ -1,9 +1,9 @@
 package gota
 
 import (
-	"testing"
 	"bytes"
 	"io"
+	"testing"
 )
 
 func TestStatistic_AddSentBytes(t *testing.T) {

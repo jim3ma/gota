@@ -8,7 +8,7 @@ import (
 	"os"
 )
 
-func TestHttpProxy(t *testing.T){
+func TestHttpProxy(t *testing.T) {
 	httpProxyEnv := os.Getenv("http_proxy")
 	if httpProxyEnv == "" {
 		t.Log("Error http_proxy environment variable.")
@@ -27,7 +27,7 @@ func TestHttpProxy(t *testing.T){
 	conn.Close()
 }
 
-func TestHttpsProxy(t *testing.T){
+func TestHttpsProxy(t *testing.T) {
 	httpsProxyEnv := os.Getenv("https_proxy")
 	if httpsProxyEnv == "" {
 		t.Log("Error https_proxy environment variable.")
