@@ -22,8 +22,6 @@ import (
 // ┃                   ...                 ┃
 
 type GotaFrame struct {
-	// client ID, only used internal
-	clientID uint32
 	// Control
 	Control bool
 	// Connection ID, when ConnID > (1 << 31), this frame is a control frame
@@ -34,6 +32,9 @@ type GotaFrame struct {
 	Length int
 	// Data
 	Payload []byte
+
+	// client ID, only used for tunnel of gota internal
+	clientID uint32
 }
 
 // String for logging
@@ -129,6 +130,7 @@ const (
 	TMCreateConnSeq
 	TMCreateConnOKSeq
 	TMCloseConnSeq
+	TMCloseConnForceSeq
 	TMCloseConnOKSeq
 	TMCloseTunnelSeq
 )

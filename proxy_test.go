@@ -34,7 +34,7 @@ func TestHttpsProxy(t *testing.T) {
 		return
 	}
 	httpsProxyURI, _ := url.Parse(httpsProxyEnv)
-	httpsDialer, err := proxy.FromURL(httpsProxyURI, HttpsDialer)
+	httpsDialer, err := proxy.FromURL(httpsProxyURI, HTTPSDialer)
 
 	conn, err := httpsDialer.Dial("tcp", "google.com:443")
 	if err != nil {

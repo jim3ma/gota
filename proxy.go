@@ -20,15 +20,15 @@ func (direct) Dial(network, addr string) (net.Conn, error) {
 	return net.Dial(network, addr)
 }
 
+// HTTPSDialer is a https proxy: one that makes network connections on tls.
+var HTTPSDialer = httpsDialer{}
+var TLSConfig = &tls.Config{}
+
 // httpsDialer
 type httpsDialer struct{}
 
-// HTTPSDialer is a https proxy: one that makes network connections on tls.
-var HttpsDialer = httpsDialer{}
-var TlsConfig = &tls.Config{}
-
 func (d httpsDialer) Dial(network, addr string) (c net.Conn, err error) {
-	c, err = tls.Dial("tcp", addr, TlsConfig)
+	c, err = tls.Dial("tcp", addr, TLSConfig)
 	if err != nil {
 		fmt.Println(err)
 	}
