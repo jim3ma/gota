@@ -56,14 +56,14 @@ func TestGotaFrame_UnmarshalBinary(t *testing.T) {
 
 func TestTMHeartBeatBytes(t *testing.T) {
 	var gf GotaFrame
-	gf.UnmarshalBinary(TMHeartBeatBytes)
+	gf.UnmarshalBinary(TMHeartBeatPingBytes)
 
 	t.Logf("GotaFrame: %+v", gf)
-	if gf.ConnID == 0 && gf.Control && gf.Length == 0 && gf.SeqNum == TMHeartBeatSeq {
-		t.Logf("Correct heartbeat bytes: %+v", TMHeartBeatBytes)
+	if gf.ConnID == 0 && gf.Control && gf.Length == 0 && gf.SeqNum == TMHeartBeatPingSeq {
+		t.Logf("Correct heartbeat bytes: %+v", TMHeartBeatPingBytes)
 		return
 	}
-	t.Errorf("Error heartbeat bytes: %+v", TMHeartBeatBytes)
+	t.Errorf("Error heartbeat bytes: %+v", TMHeartBeatPingBytes)
 }
 
 func TestTMCloseTunnelBytes(t *testing.T) {

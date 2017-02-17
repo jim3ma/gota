@@ -122,17 +122,21 @@ const MaxConnID = 1<<31 - 1
 const ControlFlagBit = 1 << 31
 
 // Connection Manage HeartBeat Time
-const TMHeartBeatSecond = 300
+const TMHeartBeatSecond = 30
+const TMHeartBeatTickerSecond = 30
+const TMHeartBeatTimeOutSecond = 300
 const TMStatReportSecond = 30
 
 const (
-	TMHeartBeatSeq = iota
+	TMHeartBeatPingSeq = iota
+	TMHeartBeatPongSeq
 	TMCreateConnSeq
 	TMCreateConnOKSeq
 	TMCloseConnSeq
 	TMCloseConnForceSeq
-	TMCloseConnOKSeq
+	//TMCloseConnOKSeq
 	TMCloseTunnelSeq
+	TMCloseTunnelOKSeq
 )
 
 const (
@@ -142,7 +146,10 @@ const (
 	TMConnMultiOverlapMode
 )
 
-var TMHeartBeatBytes []byte
+var TMHeartBeatPingBytes []byte
+var TMHeartBeatPingGotaFrame *GotaFrame
+var TMHeartBeatPongBytes []byte
+var TMHeartBeatPongGotaFrame *GotaFrame
 var TMCloseTunnelBytes []byte
 
 const HeaderLength = 10
@@ -163,12 +170,22 @@ func UnwrapGotaFrame(data []byte) *GotaFrame {
 }
 
 func init() {
-	TMHeartBeatBytes = WrapGotaFrame(&GotaFrame{
+	TMHeartBeatPingGotaFrame = &GotaFrame{
 		Control: true,
 		ConnID:  uint32(0),
 		Length:  0,
-		SeqNum:  uint32(TMHeartBeatSeq),
-	})
+		SeqNum:  uint32(TMHeartBeatPingSeq),
+	}
+	TMHeartBeatPingBytes = WrapGotaFrame(TMHeartBeatPingGotaFrame)
+
+	TMHeartBeatPongGotaFrame = &GotaFrame{
+		Control: true,
+		ConnID:  uint32(0),
+		Length:  0,
+		SeqNum:  uint32(TMHeartBeatPongSeq),
+	}
+	TMHeartBeatPongBytes = WrapGotaFrame(TMHeartBeatPongGotaFrame)
+
 	TMCloseTunnelBytes = WrapGotaFrame(&GotaFrame{
 		Control: true,
 		ConnID:  uint32(0),

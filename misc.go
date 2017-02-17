@@ -2,6 +2,7 @@ package gota
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"time"
 )
@@ -35,17 +36,35 @@ func (s *Statistic) ReceiveSpeed() uint64 {
 	return s.ReceivedBytes / uint64(t)
 }
 
+var ErrNoMoreBytes = errors.New("Read io.EOF, received bytes count less than required")
+
+// ReadNBytes reads N bytes from io.Reader,
+// it never returns the io.EOF.
+//
+// If it read N bytes from io.Reader, returns nil.
+// If it read io.EOF, but less than N bytes, return ErrNoMoreBytes.
+// If it read other errors, returns them.
 func ReadNBytes(r io.Reader, n int) ([]byte, error) {
 	var buf bytes.Buffer
-	for remain := n; remain > 0; {
+	remain := n
+	for remain > 0 {
 		data := make([]byte, remain)
 		rn, err := r.Read(data)
 
-		if err != nil {
+		if err != nil && err != io.EOF {
 			return nil, err
 		}
+
 		remain = remain - rn
 		buf.Write(data[:rn])
+
+		if err == io.EOF {
+			break
+		}
+	}
+
+	if remain > 0 {
+		return buf.Bytes(), ErrNoMoreBytes
 	}
 	return buf.Bytes(), nil
 }
