@@ -32,6 +32,8 @@ type TunnelManager struct {
 
 	ttPool []*TunnelTransport
 
+	newCCIDChannel  chan CCID
+
 	writeToConnC  chan *GotaFrame
 	readFromConnC chan *GotaFrame
 
@@ -46,6 +48,8 @@ func NewTunnelManager(rc chan *GotaFrame, wc chan *GotaFrame) *TunnelManager {
 	mu := &sync.Mutex{}
 	pool := make([]*TunnelTransport, 0)
 	return &TunnelManager{
+		newCCIDChannel: nil,
+
 		readFromConnC: rc,
 		writeToConnC:  wc,
 
@@ -88,6 +92,12 @@ func (tm *TunnelManager) SetConfig(config interface{}) error {
 	}
 	tm.config = config
 	return nil
+}
+
+func (tm *TunnelManager) SetCCIDChannel(c chan CCID) {
+	tm.mutex.Lock()
+	defer tm.mutex.Unlock()
+	tm.newCCIDChannel = c
 }
 
 func (tm *TunnelManager) Start() {
@@ -204,6 +214,7 @@ func (tm *TunnelManager) connectAndServe(config TunnelActiveConfig) {
 func (tm *TunnelManager) readDispatch() {
 	for {
 		select {
+		// for TT read
 		case c := <-tm.readPool:
 			c <- <-tm.readFromConnC
 		}
@@ -213,6 +224,7 @@ func (tm *TunnelManager) readDispatch() {
 func (tm *TunnelManager) writeDispatch() {
 	for {
 		select {
+		// for TT write
 		case c := <-tm.writePool:
 			tm.writeToConnC <- <-c
 		}
@@ -229,10 +241,12 @@ type TunnelTransport struct {
 	clientID uint32
 	quit     chan struct{}
 
-	mu      sync.Locker
+	mutex   sync.Locker
 	stopped bool
 
 	timeout int
+
+	newCCIDChannel  chan CCID
 
 	readPool    chan<- chan *GotaFrame
 	readChannel chan *GotaFrame
@@ -253,15 +267,30 @@ func NewTunnelTransport(wp, rp chan<- chan *GotaFrame, rw io.ReadWriteCloser, cl
 
 	rc := make(chan *GotaFrame)
 	wc := make(chan *GotaFrame)
+
+	quit := make(chan struct{})
 	return &TunnelTransport{
+		quit: quit,
+		mutex: &sync.Mutex{},
+
 		clientID: c,
+
+		newCCIDChannel: nil,
 
 		readPool:  rp,
 		writePool: wp,
 
 		readChannel:  rc,
 		writeChannel: wc,
+
+		rw: rw,
 	}
+}
+
+func (t *TunnelTransport) SetCCIDChannel(c chan CCID) {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	t.newCCIDChannel = c
 }
 
 // ReadFromTunnel reads from tunnel and send to connection manager
@@ -282,7 +311,7 @@ func (t *TunnelTransport) readFromPeerTunnel() {
 			return
 		}
 
-		log.Debugf("TT: Received data frame header from server: %s", gf)
+		log.Debugf("TT: Received data frame header from peer: %s", gf)
 
 		if gf.IsControl() {
 			// TODO
@@ -291,6 +320,8 @@ func (t *TunnelTransport) readFromPeerTunnel() {
 				go t.sendHeartBeatResponse()
 			case TMHeartBeatPongSeq:
 				log.Info("TT: Received Hearbeat Pong")
+			case TMCreateConnSeq:
+				t.newCCIDChannel <- NewCCID(gf.clientID,gf.ConnID)
 			}
 		}
 
@@ -318,6 +349,7 @@ func (t *TunnelTransport) writeToPeerTunnel() {
 	defer Recover()
 	tick := time.NewTicker(time.Second * TMHeartBeatTickerSecond)
 
+	log.Info("TT: Start to forward Gota Frame to peer tunnel")
 	for {
 		// register the current worker into the worker queue.
 		t.readPool <- t.readChannel
@@ -325,6 +357,7 @@ func (t *TunnelTransport) writeToPeerTunnel() {
 		select {
 		case gf := <-t.readChannel:
 			// we have received a write request.
+			log.Debugf("TT: Received data frame header from Tunnel Manager: %s", gf)
 			rawBytes, err := gf.MarshalBinary()
 			if err != nil && nil != HeaderOnly {
 				log.Errorf("TT: Marshal GotaFrame error: %+v, skip", err)
@@ -390,8 +423,8 @@ func (t *TunnelTransport) Stopped() bool {
 }
 
 func (t *TunnelTransport) close() error {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
 
 	defer Recover()
 

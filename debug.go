@@ -50,7 +50,7 @@ func GoFuncName() string {
 
 func Recover() {
 	if r := recover(); r != nil {
-		log.Errorf("Runtime error caught: %v, runtime info: %s", r, RuntimeInfo(2))
+		log.Errorf("Runtime error caught: \"%v\", runtime info: %s", r, RuntimeInfo(2))
 		log.Errorf("Call stack: %s", debug.Stack())
 	}
 }

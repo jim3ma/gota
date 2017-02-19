@@ -6,6 +6,7 @@ import (
 	"net"
 	"sync"
 	"time"
+	"math"
 )
 
 // CCID combines client ID and connection ID into a uint64 for the key of map struct
@@ -148,26 +149,65 @@ func (cm *ConnManager) Serve(addr string) {
 	cm.handleNewCCID(tcpAddr)
 }
 
+func (cm *ConnManager) dialAndCreateCH(cc CCID, addr *net.TCPAddr){
+	var conn io.ReadWriteCloser
+	var err error
+	retry := 0
+	for {
+		conn, err = net.DialTCP("tcp", nil, addr)
+		if err == nil {
+			break
+		} else {
+			retry += 1
+			sec := int32(math.Exp2(float64(retry)))
+			log.Debugf("CM: Create a new connection to remote error: %s, retry %d times after %d seconds",
+				err, retry, sec)
+			time.Sleep(time.Second * time.Duration(sec))
+		}
+
+		if retry >= MaxRetryTimes {
+			log.Debugf("CM: Create a new connection to remote error after retry %d times", retry)
+
+			// send response after created the connection error
+			resp := &GotaFrame{
+				Control:  true,
+				ConnID:   cc.ConnID(),
+				clientID: cc.ClientID(),
+				SeqNum:   TMCreateConnErrorSeq,
+				Length:   0,
+			}
+			cm.writeToTunnelC <- resp
+
+			return
+		}
+	}
+
+	// send response after created the connection
+	resp := &GotaFrame{
+		Control:  true,
+		ConnID:   0,
+		clientID: 0,
+		SeqNum:   TMCreateConnOKSeq,
+		Length:   0,
+	}
+	cm.writeToTunnelC <- resp
+
+	rc := make(chan *GotaFrame)
+	ch := &ConnHandler{
+		ClientID:        cc.ClientID(),
+		ConnID:          cc.ConnID(),
+		rw:              conn,
+		WriteToTunnelC:  cm.writeToTunnelC,
+		ReadFromTunnelC: rc,
+	}
+	cm.connHandlerPool[cc] = ch
+	go ch.Start()
+}
+
 func (cm *ConnManager) handleNewCCID(addr *net.TCPAddr) {
 	for cc := range cm.newCCIDChannel {
 		log.Debugf("CM: New CCID comes from tunnel, CCID: %d", cc)
-		go func(cc CCID) {
-			conn, err := net.DialTCP("tcp", nil, addr)
-			if err != nil {
-				log.Debugf("CM: Create a new connection to remote error: %s", err)
-				return
-			}
-			rc := make(chan *GotaFrame)
-			ch := &ConnHandler{
-				ClientID:        cc.ClientID(),
-				ConnID:          cc.ConnID(),
-				rw:              conn,
-				WriteToTunnelC:  cm.writeToTunnelC,
-				ReadFromTunnelC: rc,
-			}
-			cm.connHandlerPool[cc] = ch
-			go ch.Start()
-		}(cc)
+		go cm.dialAndCreateCH(cc, addr)
 	}
 }
 
@@ -476,6 +516,8 @@ func (ch *ConnHandler) sendForceCloseGotaFrame() {
 }
 
 var cache sync.Pool
+
+const MaxRetryTimes = 3
 
 func init() {
 	cache = sync.Pool{

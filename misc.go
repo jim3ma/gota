@@ -38,7 +38,7 @@ func (s *Statistic) ReceiveSpeed() uint64 {
 
 var ErrNoMoreBytes = errors.New("Read io.EOF, received bytes count less than required")
 
-// ReadNBytes reads N bytes from io.Reader,
+// ReadNBytes read N bytes from io.Reader,
 // it never returns the io.EOF.
 //
 // If it read N bytes from io.Reader, returns nil.
@@ -69,6 +69,7 @@ func ReadNBytes(r io.Reader, n int) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// WriteNBytes write N bytes to io.Writer
 func WriteNBytes(w io.Writer, n int, d []byte) error {
 	for wrote := 0; wrote < n; {
 		wn, err := w.Write(d[wrote:])
@@ -80,11 +81,15 @@ func WriteNBytes(w io.Writer, n int, d []byte) error {
 	return nil
 }
 
+// RWCloseWriter add CloseWrite to io.ReadWriteCloser for only closing write
+// after call func CloseWrite, io.ReadWriteCloser can still be read
 type RWCloseWriter interface {
 	CloseWrite() error
 	io.ReadWriteCloser
 }
 
+// RWCloseReader add CloseRead to io.ReadWriteCloser for only closing read
+// after call func CloseRead, io.ReadWriteCloser can still be write
 type RWCloseReader interface {
 	CloseRead() error
 	io.ReadWriteCloser

@@ -122,8 +122,8 @@ const MaxConnID = 1<<31 - 1
 const ControlFlagBit = 1 << 31
 
 // Connection Manage HeartBeat Time
-const TMHeartBeatSecond = 30
-const TMHeartBeatTickerSecond = 30
+const TMHeartBeatSecond = 3
+const TMHeartBeatTickerSecond = 10
 const TMHeartBeatTimeOutSecond = 300
 const TMStatReportSecond = 30
 
@@ -132,6 +132,7 @@ const (
 	TMHeartBeatPongSeq
 	TMCreateConnSeq
 	TMCreateConnOKSeq
+	TMCreateConnErrorSeq
 	TMCloseConnSeq
 	TMCloseConnForceSeq
 	//TMCloseConnOKSeq
