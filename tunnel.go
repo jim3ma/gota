@@ -131,6 +131,7 @@ func (tm *TunnelManager) startActiveMode() {
 	if !ok {
 		return
 	}
+	log.Info("TM: Work in Active Mode")
 	for _, c := range config {
 		go tm.connectAndServe(c)
 	}
@@ -141,12 +142,15 @@ func (tm *TunnelManager) startPassiveMode() {
 	if !ok {
 		return
 	}
+	log.Info("TM: Work in Passive Mode")
 	for _, c := range config {
 		go tm.listenAndServe(c)
 	}
 }
 
 func (tm *TunnelManager) listenAndServe(config TunnelPassiveConfig) {
+	log.Infof("TM: Tunnel Passive Configuration: %+v", config)
+
 	listener, err := net.ListenTCP("tcp", config.TCPAddr)
 	if err != nil {
 		panic(err)
@@ -167,9 +171,12 @@ func (tm *TunnelManager) listenAndServe(config TunnelPassiveConfig) {
 			log.Errorf("TM: Accept Connection Error: %s", err)
 		}
 
+
+		log.Infof("TM: Accept Connection from: %s", conn.RemoteAddr())
 		// TODO authenticate and set Client ID
 
 		t := NewTunnelTransport(tm.writePool, tm.readPool, conn)
+		t.SetCCIDChannel(tm.newCCIDChannel)
 		tm.ttPool = append(tm.ttPool, t)
 		go t.Start()
 	}
@@ -203,9 +210,13 @@ func (tm *TunnelManager) connectAndServe(config TunnelActiveConfig) {
 		conn, err = net.DialTCP("tcp", config.LocalAddr, config.RemoteAddr)
 	}
 
+	// TODO retry
 	if err != nil {
 		log.Errorf("TM: Connect remote end error: %s", err)
+		return
 	}
+
+	log.Infof("TM: Connected remote: %s", conn.RemoteAddr())
 
 	// TODO authenticate and set Client ID
 
@@ -219,7 +230,9 @@ func (tm *TunnelManager) readDispatch() {
 		select {
 		// for TT read
 		case c := <-tm.readPool:
-			c <- <-tm.readFromConnC
+			gf := <-tm.readFromConnC
+			log.Debugf("TM: Received frame from CM: %s", gf)
+			c <- gf
 		}
 	}
 }
@@ -229,7 +242,9 @@ func (tm *TunnelManager) writeDispatch() {
 		select {
 		// for TT write
 		case c := <-tm.writePool:
-			tm.writeToConnC <- <-c
+			gf := <- c
+			log.Debugf("TM: Send frame to CM: %s", gf)
+			tm.writeToConnC <- gf
 		}
 	}
 }
@@ -325,17 +340,25 @@ func (t *TunnelTransport) readFromPeerTunnel() {
 			return
 		}
 
-		log.Debugf("TT: Received data frame header from peer: %s", gf)
+		log.Debugf("TT: Received gota frame header from peer: %s", gf)
 
 		if gf.IsControl() {
-			// TODO
+			log.Debug("TT: Process Control Signal")
 			switch gf.SeqNum {
 			case TMHeartBeatPingSeq:
 				go t.sendHeartBeatResponse()
 			case TMHeartBeatPongSeq:
 				log.Info("TT: Received Hearbeat Pong")
+
 			case TMCreateConnSeq:
+				log.Debug("TT: Received Create Connection Signal")
 				t.newCCIDChannel <- NewCCID(gf.clientID, gf.ConnID)
+			case TMCreateConnOKSeq:
+				// TODO optimize
+				log.Debug("TT: Received Create Connection OK Signal")
+				t.writePool <- t.writeChannel
+				t.writeChannel <- &gf
+
 			case TMCloseTunnelSeq:
 				log.Info("TT: Received Close Tunnel Request, Stop Read!")
 				go t.sendCloseTunnelResponse()
@@ -343,6 +366,15 @@ func (t *TunnelTransport) readFromPeerTunnel() {
 			case TMCloseTunnelOKSeq:
 				log.Info("TT: Received Close Tunnel Response, Stop Read!")
 				return
+
+			case TMCloseConnSeq:
+				log.Debug("TT: Received Close Connection Signal")
+				t.writePool <- t.writeChannel
+				t.writeChannel <- &gf
+			case TMCloseConnForceSeq:
+				log.Debug("TT: Received Force Close Connection Signal")
+				t.writePool <- t.writeChannel
+				t.writeChannel <- &gf
 			}
 			continue
 		}
@@ -356,6 +388,8 @@ func (t *TunnelTransport) readFromPeerTunnel() {
 
 		// register the current worker into the worker queue.
 		t.writePool <- t.writeChannel
+
+		log.Debug("TT: Register into the worker queue")
 
 		select {
 		case t.writeChannel <- &gf:

@@ -149,6 +149,13 @@ func (cm *ConnManager) Serve(addr string) {
 	cm.handleNewCCID(tcpAddr)
 }
 
+func (cm *ConnManager) handleNewCCID(addr *net.TCPAddr) {
+	for cc := range cm.newCCIDChannel {
+		log.Debugf("CM: New CCID comes from tunnel, CCID: %d", cc)
+		go cm.dialAndCreateCH(cc, addr)
+	}
+}
+
 func (cm *ConnManager) dialAndCreateCH(cc CCID, addr *net.TCPAddr) {
 	var conn io.ReadWriteCloser
 	var err error
@@ -181,17 +188,6 @@ func (cm *ConnManager) dialAndCreateCH(cc CCID, addr *net.TCPAddr) {
 			return
 		}
 	}
-
-	// send response after created the connection
-	resp := &GotaFrame{
-		Control:  true,
-		ConnID:   0,
-		clientID: 0,
-		SeqNum:   TMCreateConnOKSeq,
-		Length:   0,
-	}
-	cm.writeToTunnelC <- resp
-
 	rc := make(chan *GotaFrame)
 	ch := &ConnHandler{
 		ClientID:        cc.ClientID(),
@@ -202,13 +198,17 @@ func (cm *ConnManager) dialAndCreateCH(cc CCID, addr *net.TCPAddr) {
 	}
 	cm.connHandlerPool[cc] = ch
 	go ch.Start()
-}
 
-func (cm *ConnManager) handleNewCCID(addr *net.TCPAddr) {
-	for cc := range cm.newCCIDChannel {
-		log.Debugf("CM: New CCID comes from tunnel, CCID: %d", cc)
-		go cm.dialAndCreateCH(cc, addr)
+	// send response after created the connection
+	resp := &GotaFrame{
+		Control:  true,
+		ConnID:   cc.ConnID(),
+		clientID: cc.ClientID(),
+		SeqNum:   TMCreateConnOKSeq,
+		Length:   0,
 	}
+	cm.writeToTunnelC <- resp
+
 }
 
 func (cm *ConnManager) handleNewConn(newChannel chan io.ReadWriteCloser) {
@@ -227,11 +227,13 @@ func (cm *ConnManager) handleNewConn(newChannel chan io.ReadWriteCloser) {
 		cm.connHandlerPool[NewCCID(0, cid)] = ch
 		// TODO send to a work pool for performance reason
 		go func() {
+			log.Debug("CM: Try to create peer connection")
 			if !ch.CreatePeerConn() {
 				log.Error("CM: Create peer connection error")
 				// destroy the unused connection handler
 				return
 			}
+			log.Debug("CM: Created peer connection")
 			go ch.Start()
 		}()
 
@@ -283,6 +285,7 @@ func (cm *ConnManager) stopAllConnHandler() {
 
 func (cm *ConnManager) dispatch() {
 	for gf := range cm.readFromTunnelC {
+		log.Debugf("CM: Received frame from tunnel: %s", gf)
 		if ch, ok := cm.connHandlerPool[NewCCID(gf.clientID, gf.ConnID)]; ok {
 			// TODO use work pool to avoid hang here
 			ch.ReadFromTunnelC <- gf
@@ -382,15 +385,17 @@ func (ch *ConnHandler) readFromTunnel() {
 
 	log.Debugf("CH: Start to read from tunnel, conn id: %d", ch.ClientID)
 	for gf := range ch.ReadFromTunnelC {
-		if gf.IsControl() && gf.SeqNum == TMCloseConnSeq {
-			log.Debug("CH: Received close connection signal")
-			return
-		}
-
-		if gf.IsControl() && gf.SeqNum == TMCloseConnForceSeq {
-			log.Debug("CH: Received force close connection signal")
-			ch.rw.Close()
-			return
+		if gf.IsControl() {
+			// TODO control signal handle
+			if gf.SeqNum == TMCloseConnSeq {
+				log.Debug("CH: Received close connection signal")
+				return
+			} else if gf.SeqNum == TMCloseConnForceSeq {
+				log.Debug("CH: Received force close connection signal")
+				ch.rw.Close()
+				return
+			}
+			continue
 		}
 
 		if gf.SeqNum == seq {

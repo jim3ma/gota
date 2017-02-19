@@ -6,7 +6,7 @@ import (
 	log "github.com/Sirupsen/logrus"
 	"io"
 	"net"
-	"net/http"
+	//"net/http"
 	_ "net/http/pprof"
 	"testing"
 	"time"
@@ -390,7 +390,7 @@ func init() {
 	log.SetLevel(log.DebugLevel)
 
 	// pprof debug
-	go func() {
-		log.Println(http.ListenAndServe("localhost:6060", nil))
-	}()
+	//go func() {
+	//	log.Println(http.ListenAndServe("localhost:6060", nil))
+	//}()
 }
