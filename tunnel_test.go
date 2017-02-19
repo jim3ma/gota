@@ -199,5 +199,7 @@ func TestTunnelTransport_Start(t *testing.T) {
 		}
 	}
 
-	time.Sleep(time.Second * 100)
+	time.Sleep(time.Second * 5)
+	t1.Stop()
+	t2.Stop()
 }

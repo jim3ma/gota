@@ -323,6 +323,7 @@ func (t *TunnelTransport) readFromPeerTunnel() {
 			case TMCreateConnSeq:
 				t.newCCIDChannel <- NewCCID(gf.clientID,gf.ConnID)
 			}
+			continue
 		}
 
 		payload, err := ReadNBytes(t.rw, gf.Length)
@@ -351,13 +352,12 @@ func (t *TunnelTransport) writeToPeerTunnel() {
 
 	log.Info("TT: Start to forward Gota Frame to peer tunnel")
 	for {
-		// register the current worker into the worker queue.
-		t.readPool <- t.readChannel
-	CONTINUE:
 		select {
+		// register the current worker into the worker queue.
+		case t.readPool <- t.readChannel:
 		case gf := <-t.readChannel:
 			// we have received a write request.
-			log.Debugf("TT: Received data frame header from Tunnel Manager: %s", gf)
+			log.Debugf("TT: Send data frame header to peer: %s", gf)
 			rawBytes, err := gf.MarshalBinary()
 			if err != nil && nil != HeaderOnly {
 				log.Errorf("TT: Marshal GotaFrame error: %+v, skip", err)
@@ -369,27 +369,18 @@ func (t *TunnelTransport) writeToPeerTunnel() {
 				break
 			}
 
-			// the heartbeat response is only send the worker itself, so skip to register into queue
-			if gf.IsControl() && gf.SeqNum == TMHeartBeatPongSeq {
-				goto CONTINUE
-			}
-
 		case <-time.After(time.Second * TMHeartBeatSecond):
 			if t.sendHeartBeatRequest() != nil {
 				log.Error("TT: Send heartbeat failed, stop this worker")
 				break
 			}
 			log.Info("TT: Sent Hearbeat Ping")
-			goto CONTINUE
-
 		case <-tick.C:
 			if t.sendHeartBeatRequest() != nil {
 				log.Error("TT: Send heartbeat failed, stop this worker")
 				break
 			}
 			log.Info("TT: Sent Hearbeat Ping")
-			goto CONTINUE
-
 		case <-t.quit:
 			// received a signal to stop
 			return
@@ -403,6 +394,7 @@ func (t *TunnelTransport) sendHeartBeatRequest() error {
 
 func (t *TunnelTransport) sendHeartBeatResponse() {
 	t.readChannel <- TMHeartBeatPongGotaFrame
+	log.Info("TT: Sent Hearbeat Pong")
 }
 
 // Start method starts the run loop for the worker, listening for a quit channel in
