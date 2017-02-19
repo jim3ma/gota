@@ -94,3 +94,16 @@ type RWCloseReader interface {
 	CloseRead() error
 	io.ReadWriteCloser
 }
+
+// CompareGotaFrame compares GotaFrame a and b
+// If they are same GotaFrame, return true else return false
+func CompareGotaFrame(a, b *GotaFrame) bool {
+	if a.Control == b.Control &&
+		a.ConnID == b.ConnID &&
+		a.SeqNum == b.SeqNum &&
+		a.Length == b.Length &&
+		bytes.Compare(a.Payload, b.Payload) == 0 {
+		return true
+	}
+	return false
+}

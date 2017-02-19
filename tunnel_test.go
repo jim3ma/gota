@@ -1,11 +1,12 @@
 package gota
 
 import (
-	"testing"
 	"bytes"
 	"io"
+	"testing"
 
 	log "github.com/Sirupsen/logrus"
+	"net"
 	"time"
 )
 
@@ -62,14 +63,14 @@ func (b *bufferWithClose) Close() error {
 }
 
 type bidirectionBufferEnd struct {
-	rc chan []byte
-	wc chan []byte
+	rc  chan []byte
+	wc  chan []byte
 	buf bytes.Buffer
 }
 
 func (b *bidirectionBufferEnd) Read(p []byte) (n int, err error) {
 	if b.buf.Len() <= 0 {
-		buf, ok := <- b.rc
+		buf, ok := <-b.rc
 		if ok {
 			b.buf.Write(buf)
 		}
@@ -87,7 +88,16 @@ func (b *bidirectionBufferEnd) Write(p []byte) (n int, err error) {
 
 // Add a Close method to our buffer so that we satisfy io.ReadWriteCloser.
 func (b *bidirectionBufferEnd) Close() error {
-	close(b.wc)
+	//close(b.wc)
+	return nil
+}
+
+func (b *bidirectionBufferEnd) CloseWrite() error {
+	//close(b.wc)
+	return nil
+}
+
+func (b *bidirectionBufferEnd) CloseRead() error {
 	return nil
 }
 
@@ -97,22 +107,22 @@ type bidirectBuffer struct {
 }
 
 func newBidirectBuffer() *bidirectBuffer {
-	c1 := make(chan[]byte)
-	c2 := make(chan[]byte)
+	c1 := make(chan []byte)
+	c2 := make(chan []byte)
 	return &bidirectBuffer{
 		c1: c1,
 		c2: c2,
 	}
 }
 
-func (b *bidirectBuffer) Ends() (io.ReadWriteCloser, io.ReadWriteCloser){
+func (b *bidirectBuffer) Ends() (io.ReadWriteCloser, io.ReadWriteCloser) {
 	return &bidirectionBufferEnd{
-		rc: b.c1,
-		wc: b.c2,
-	}, &bidirectionBufferEnd{
-		wc: b.c1,
-		rc: b.c2,
-	}
+			rc: b.c1,
+			wc: b.c2,
+		}, &bidirectionBufferEnd{
+			wc: b.c1,
+			rc: b.c2,
+		}
 }
 
 func Test_bidirectBuffer(t *testing.T) {
@@ -126,7 +136,6 @@ func Test_bidirectBuffer(t *testing.T) {
 		log.Error("")
 	}
 	log.Infof("read from e1: %d", n)
-
 
 	go e2.Write([]byte("e2 write"))
 	data2 := make([]byte, 1024)
@@ -164,12 +173,12 @@ func TestTunnelTransport_Start(t *testing.T) {
 
 		gf := &GotaFrame{
 			clientID: 0,
-			Length: n,
-			ConnID: 0,
-			Payload: data[:n],
+			Length:   n,
+			ConnID:   0,
+			Payload:  data[:n],
 		}
-		<- rp1 <- gf
-		gf2 := <- <- wp2
+		<-rp1 <- gf
+		gf2 := <-<-wp2
 		if gf2.Length != n && bytes.Compare(gf.Payload, gf2.Payload) != 0 {
 			t.Errorf("Received error gota frame: %s, except: %s", gf2, gf)
 		}
@@ -201,5 +210,61 @@ func TestTunnelTransport_Start(t *testing.T) {
 
 	time.Sleep(time.Second * 5)
 	t1.Stop()
-	t2.Stop()
+	//t2.Stop()
+}
+
+func TestTunnelManager_Start(t *testing.T) {
+	addr, _ := net.ResolveTCPAddr("tcp", "127.0.0.1:32770")
+
+	rc1 := make(chan *GotaFrame)
+	wc1 := make(chan *GotaFrame)
+	tm1 := NewTunnelManager(rc1, wc1)
+	pc := TunnelPassiveConfig{
+		TCPAddr: addr,
+	}
+	tm1.SetConfig(pc)
+	tm1.Start()
+
+	rc2 := make(chan *GotaFrame)
+	wc2 := make(chan *GotaFrame)
+	tm2 := NewTunnelManager(rc2, wc2)
+
+	ac := TunnelActiveConfig{
+		LocalAddr:  nil,
+		RemoteAddr: addr,
+	}
+	tm2.SetConfig(ac)
+	tm2.Start()
+
+	payload := []byte("payload")
+
+	gf1 := &GotaFrame{
+		Control: false,
+		ConnID:  0,
+		SeqNum:  0,
+		Length:  len(payload),
+		Payload: payload,
+	}
+
+	rc1 <- gf1
+	gf2 := <-wc2
+
+	if !CompareGotaFrame(gf1, gf2) {
+		t.Errorf("Error Gota Frame received, wanted %s, but received %s", gf1, gf2)
+	}
+
+	gf3 := &GotaFrame{
+		Control: false,
+		ConnID:  1,
+		SeqNum:  0,
+		Length:  len(payload),
+		Payload: payload,
+	}
+
+	rc2 <- gf3
+	gf4 := <-wc1
+
+	if !CompareGotaFrame(gf3, gf4) {
+		t.Errorf("Error Gota Frame received, wanted %s, but received %s", gf3, gf4)
+	}
 }

@@ -3,10 +3,10 @@ package gota
 import (
 	log "github.com/Sirupsen/logrus"
 	"io"
+	"math"
 	"net"
 	"sync"
 	"time"
-	"math"
 )
 
 // CCID combines client ID and connection ID into a uint64 for the key of map struct
@@ -149,7 +149,7 @@ func (cm *ConnManager) Serve(addr string) {
 	cm.handleNewCCID(tcpAddr)
 }
 
-func (cm *ConnManager) dialAndCreateCH(cc CCID, addr *net.TCPAddr){
+func (cm *ConnManager) dialAndCreateCH(cc CCID, addr *net.TCPAddr) {
 	var conn io.ReadWriteCloser
 	var err error
 	retry := 0

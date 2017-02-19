@@ -122,8 +122,8 @@ const MaxConnID = 1<<31 - 1
 const ControlFlagBit = 1 << 31
 
 // Connection Manage HeartBeat Time
-const TMHeartBeatSecond = 3
-const TMHeartBeatTickerSecond = 10
+const TMHeartBeatSecond = 30
+const TMHeartBeatTickerSecond = 90
 const TMHeartBeatTimeOutSecond = 300
 const TMStatReportSecond = 30
 
@@ -152,6 +152,9 @@ var TMHeartBeatPingGotaFrame *GotaFrame
 var TMHeartBeatPongBytes []byte
 var TMHeartBeatPongGotaFrame *GotaFrame
 var TMCloseTunnelBytes []byte
+var TMCloseTunnelGotaFrame *GotaFrame
+var TMCloseTunnelOKBytes []byte
+var TMCloseTunnelOKGotaFrame *GotaFrame
 
 const HeaderLength = 10
 
@@ -187,10 +190,19 @@ func init() {
 	}
 	TMHeartBeatPongBytes = WrapGotaFrame(TMHeartBeatPongGotaFrame)
 
-	TMCloseTunnelBytes = WrapGotaFrame(&GotaFrame{
+	TMCloseTunnelGotaFrame = &GotaFrame{
 		Control: true,
 		ConnID:  uint32(0),
 		Length:  0,
 		SeqNum:  uint32(TMCloseTunnelSeq),
-	})
+	}
+	TMCloseTunnelBytes = WrapGotaFrame(TMCloseTunnelGotaFrame)
+
+	TMCloseTunnelOKGotaFrame = &GotaFrame{
+		Control: true,
+		ConnID:  uint32(0),
+		Length:  0,
+		SeqNum:  uint32(TMCloseTunnelOKSeq),
+	}
+	TMCloseTunnelOKBytes = WrapGotaFrame(TMCloseTunnelOKGotaFrame)
 }

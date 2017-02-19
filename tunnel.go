@@ -32,7 +32,7 @@ type TunnelManager struct {
 
 	ttPool []*TunnelTransport
 
-	newCCIDChannel  chan CCID
+	newCCIDChannel chan CCID
 
 	writeToConnC  chan *GotaFrame
 	readFromConnC chan *GotaFrame
@@ -41,6 +41,9 @@ type TunnelManager struct {
 	writePool chan chan *GotaFrame
 }
 
+// NewTunnelManager returns a new TunnelManager
+// rc is used for reading fron connection manager
+// wc is used for writing to connection manager
 func NewTunnelManager(rc chan *GotaFrame, wc chan *GotaFrame) *TunnelManager {
 	rp := make(chan chan *GotaFrame)
 	wp := make(chan chan *GotaFrame)
@@ -239,14 +242,16 @@ func (tm *TunnelManager) stopAllTunnelTransport() {
 
 type TunnelTransport struct {
 	clientID uint32
-	quit     chan struct{}
 
-	mutex   sync.Locker
-	stopped bool
+	quit chan struct{}
+
+	mutex        sync.Locker
+	writeStopped bool
+	readStopped  bool
 
 	timeout int
 
-	newCCIDChannel  chan CCID
+	newCCIDChannel chan CCID
 
 	readPool    chan<- chan *GotaFrame
 	readChannel chan *GotaFrame
@@ -270,7 +275,7 @@ func NewTunnelTransport(wp, rp chan<- chan *GotaFrame, rw io.ReadWriteCloser, cl
 
 	quit := make(chan struct{})
 	return &TunnelTransport{
-		quit: quit,
+		quit:  quit,
 		mutex: &sync.Mutex{},
 
 		clientID: c,
@@ -295,7 +300,16 @@ func (t *TunnelTransport) SetCCIDChannel(c chan CCID) {
 
 // ReadFromTunnel reads from tunnel and send to connection manager
 func (t *TunnelTransport) readFromPeerTunnel() {
-	defer t.close()
+	defer func() {
+		close(t.writeChannel)
+		t.writeStopped = true
+
+		if c, ok := t.rw.(RWCloseReader); ok {
+			c.CloseRead()
+		} else {
+			t.rw.Close()
+		}
+	}()
 	defer Recover()
 	for {
 		header, err := ReadNBytes(t.rw, HeaderLength)
@@ -321,7 +335,14 @@ func (t *TunnelTransport) readFromPeerTunnel() {
 			case TMHeartBeatPongSeq:
 				log.Info("TT: Received Hearbeat Pong")
 			case TMCreateConnSeq:
-				t.newCCIDChannel <- NewCCID(gf.clientID,gf.ConnID)
+				t.newCCIDChannel <- NewCCID(gf.clientID, gf.ConnID)
+			case TMCloseTunnelSeq:
+				log.Info("TT: Received Close Tunnel Request, Stop Read!")
+				go t.sendCloseTunnelResponse()
+				return
+			case TMCloseTunnelOKSeq:
+				log.Info("TT: Received Close Tunnel Response, Stop Read!")
+				return
 			}
 			continue
 		}
@@ -346,7 +367,15 @@ func (t *TunnelTransport) readFromPeerTunnel() {
 
 // WriteToTunnel reads from connection and send to tunnel
 func (t *TunnelTransport) writeToPeerTunnel() {
-	defer t.close()
+	defer func() {
+		close(t.readChannel)
+		t.readStopped = true
+		if c, ok := t.rw.(RWCloseWriter); ok {
+			c.CloseWrite()
+		} else {
+			t.rw.Close()
+		}
+	}()
 	defer Recover()
 	tick := time.NewTicker(time.Second * TMHeartBeatTickerSecond)
 
@@ -382,7 +411,16 @@ func (t *TunnelTransport) writeToPeerTunnel() {
 			}
 			log.Info("TT: Sent Hearbeat Ping")
 		case <-t.quit:
+			// TODO if the read channel already registered to the read pool
+
+			// received stop tunnel signal
+			// just workaround
+			if t.readStopped {
+				return
+			}
+
 			// received a signal to stop
+			t.sendCloseTunnelRequest()
 			return
 		}
 	}
@@ -397,6 +435,24 @@ func (t *TunnelTransport) sendHeartBeatResponse() {
 	log.Info("TT: Sent Hearbeat Pong")
 }
 
+func (t *TunnelTransport) sendCloseTunnelRequest() error {
+	err := WriteNBytes(t.rw, HeaderLength, TMCloseTunnelBytes)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (t *TunnelTransport) sendCloseTunnelResponse() {
+	err := WriteNBytes(t.rw, HeaderLength, TMCloseTunnelOKBytes)
+	if err != nil {
+		log.Errorf("TT: Sent Close Tunnel response error: %s", err)
+	}
+	log.Info("TT: Sent Close Tunnel response")
+	t.readStopped = true
+	close(t.quit)
+}
+
 // Start method starts the run loop for the worker, listening for a quit channel in
 // case we need to stop it
 func (t *TunnelTransport) Start() {
@@ -406,27 +462,32 @@ func (t *TunnelTransport) Start() {
 
 // Stop signals the worker to stop listening for work requests.
 func (t *TunnelTransport) Stop() {
-	// close a channel will trigger all reading from the channel to return immediately
-	close(t.quit)
-}
-
-func (t *TunnelTransport) Stopped() bool {
-	return t.stopped
-}
-
-func (t *TunnelTransport) close() error {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 
-	defer Recover()
-
-	if !t.stopped {
-		t.stopped = true
-		close(t.readChannel)
-		close(t.writeChannel)
-		return t.rw.Close()
+	if t.readStopped && t.writeStopped {
+		return
 	}
-	return nil
+	// close a channel will trigger all reading from the channel to return immediately
+	close(t.quit)
+	timeout := 0
+	for {
+		if timeout < TMHeartBeatSecond {
+			time.Sleep(time.Second)
+			timeout++
+		} else {
+			if t.readStopped && t.writeStopped {
+				return
+			} else {
+				t.rw.Close()
+				return
+			}
+		}
+	}
+}
+
+func (t *TunnelTransport) Stopped() bool {
+	return t.readStopped && t.writeStopped
 }
 
 const (
