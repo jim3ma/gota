@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"sync"
 	"time"
+	"bytes"
 )
 
 type TunnelActiveConfig struct {
@@ -156,24 +157,84 @@ func (tm *TunnelManager) listenAndServe(config TunnelPassiveConfig) {
 		panic(err)
 	}
 
+	restart := make(chan struct{})
+
 	go func() {
 		// TODO graceful shutdown?
 		select {
 		case <-tm.quit:
 			log.Info("TM: Received quit signal")
 			listener.Close()
+		case <- restart:
 		}
 	}()
 
 	for {
 		conn, err := listener.AcceptTCP()
 		if err != nil {
-			log.Errorf("TM: Accept Connection Error: %s", err)
+			select {
+			// quit signal
+			case <-tm.quit:
+				return
+			default:
+				// TODO if encount network error, restart
+				log.Errorf("TM: Accept Connection Error: %s", err)
+				log.Info("TM: Restart Tunnel with Configuration: %+v", config)
+				go tm.listenAndServe(config)
+
+				// close the routine for listening graceful shutdown
+				close(restart)
+			}
 		}
 
 
 		log.Infof("TM: Accept Connection from: %s", conn.RemoteAddr())
-		// TODO authenticate and set Client ID
+		// TODO set Client ID
+
+		// Authenticate start
+		header, err := ReadNBytes(conn, HeaderLength)
+		if err != nil {
+			log.Error("TM: Received gota frame header error, stop auth")
+			conn.Close()
+			continue
+		}
+
+		var request GotaFrame
+		request.UnmarshalBinary(header)
+
+		if request.SeqNum != TMTunnelAuthSeq {
+			log.Error("TM: Auth header error, close connection")
+			conn.Close()
+			continue
+		}
+		username := "gota"
+		password := "gota"
+
+		payload, err := ReadNBytes(conn, request.Length)
+		if err != nil {
+			log.Error("TM: Received gota frame error, close connection")
+			conn.Close()
+			continue
+		}
+		request.Payload = payload
+
+		if bytes.Compare(
+			BasicAuthGotaFrame(username, password).Payload,
+			request.Payload,
+			) != 0 {
+
+			log.Error("TM: Auth credentail error, close connection")
+			conn.Close()
+			continue
+		}
+		err = WriteNBytes(conn, len(TMTunnelAuthOKBytes), TMTunnelAuthOKBytes)
+		if err != nil {
+			log.Error("TM: Write gota frame header error, close connection")
+			conn.Close()
+			continue
+		}
+		log.Infof("TM: User %s, authenticate success", username)
+		// Authenticate end
 
 		t := NewTunnelTransport(tm.writePool, tm.readPool, conn)
 		t.SetCCIDChannel(tm.newCCIDChannel)
@@ -194,13 +255,13 @@ func (tm *TunnelManager) connectAndServe(config TunnelActiveConfig) {
 		var dialer proxy.Dialer
 		switch config.Proxy.Scheme {
 		case "https":
-			log.Infof("TM: Connect remoet using HTTPS proxy")
+			log.Infof("TM: Connect remote using HTTPS proxy")
 			dialer, _ = proxy.FromURL(config.Proxy, HTTPSDialer)
 		case "http":
-			log.Infof("TM: Connect remoet using HTTP proxy")
+			log.Infof("TM: Connect remote using HTTP proxy")
 			dialer, _ = proxy.FromURL(config.Proxy, Direct)
 		case "socks5":
-			log.Infof("TM: Connect remoet using SOCKS5 proxy")
+			log.Infof("TM: Connect remote using SOCKS5 proxy")
 			dialer, _ = proxy.FromURL(config.Proxy, Direct)
 		default:
 			log.Errorf("TM: Unsupport proxy: %+v", config.Proxy)
@@ -209,6 +270,7 @@ func (tm *TunnelManager) connectAndServe(config TunnelActiveConfig) {
 	} else {
 		conn, err = net.DialTCP("tcp", config.LocalAddr, config.RemoteAddr)
 	}
+	// TODO TLS dial
 
 	// TODO retry
 	if err != nil {
@@ -218,11 +280,37 @@ func (tm *TunnelManager) connectAndServe(config TunnelActiveConfig) {
 
 	log.Infof("TM: Connected remote: %s", conn.RemoteAddr())
 
-	// TODO authenticate and set Client ID
+	// TODO hard code credential
+	// Authenticate start
+	request := BasicAuthGotaFrame("gota", "gota")
+	rawBytes, _ := request.MarshalBinary()
+	err = WriteNBytes(conn, len(rawBytes), rawBytes)
+	if err != nil {
+		// TODO retry
+		log.Error("TM: Write gota frame error, stop auth")
+		return
+	}
+
+	header, err := ReadNBytes(conn, HeaderLength)
+	if err != nil {
+		// TODO retry
+		log.Error("TM: Received gota frame header error, stop auth")
+		return
+	}
+
+	var response GotaFrame
+	response.UnmarshalBinary(header)
+
+	if response.SeqNum != TMTunnelAuthOKSeq {
+		log.Error("TM: Auth error, please check the credential")
+		return
+	}
+	log.Info("TM: Auth success")
+	// Authenticate end
 
 	t := NewTunnelTransport(tm.writePool, tm.readPool, conn)
 	tm.ttPool = append(tm.ttPool, t)
-	go t.Start()
+	t.Start()
 }
 
 func (tm *TunnelManager) readDispatch() {

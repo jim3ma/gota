@@ -2,6 +2,7 @@ package gota
 
 import (
 	"bytes"
+	"encoding/base64"
 	"errors"
 	"io"
 	"time"
@@ -106,4 +107,17 @@ func CompareGotaFrame(a, b *GotaFrame) bool {
 		return true
 	}
 	return false
+}
+
+func BasicAuthGotaFrame(username, password string) *GotaFrame {
+	auth := username + ":" + password
+	authBytes := []byte(base64.StdEncoding.EncodeToString([]byte(auth)))
+
+	gf := &GotaFrame{
+		Control: true,
+		SeqNum:  uint32(TMTunnelAuthSeq),
+		Length:  len(authBytes),
+		Payload: authBytes,
+	}
+	return gf
 }

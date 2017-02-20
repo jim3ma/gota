@@ -130,6 +130,8 @@ const TMStatReportSecond = 30
 const (
 	TMHeartBeatPingSeq = iota
 	TMHeartBeatPongSeq
+	TMTunnelAuthSeq
+	TMTunnelAuthOKSeq
 	TMCreateConnSeq
 	TMCreateConnOKSeq
 	TMCreateConnErrorSeq
@@ -155,6 +157,8 @@ var TMCloseTunnelBytes []byte
 var TMCloseTunnelGotaFrame *GotaFrame
 var TMCloseTunnelOKBytes []byte
 var TMCloseTunnelOKGotaFrame *GotaFrame
+var TMTunnelAuthOKBytes []byte
+var TMTunnelAuthOKGotaFrame *GotaFrame
 
 const HeaderLength = 10
 
@@ -205,4 +209,12 @@ func init() {
 		SeqNum:  uint32(TMCloseTunnelOKSeq),
 	}
 	TMCloseTunnelOKBytes = WrapGotaFrame(TMCloseTunnelOKGotaFrame)
+
+	TMTunnelAuthOKGotaFrame = &GotaFrame{
+		Control: true,
+		ConnID:  uint32(0),
+		Length:  0,
+		SeqNum:  uint32(TMTunnelAuthOKSeq),
+	}
+	TMTunnelAuthOKBytes = WrapGotaFrame(TMTunnelAuthOKGotaFrame)
 }

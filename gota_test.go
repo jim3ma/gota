@@ -12,9 +12,11 @@ func TestGota_ListenAndServe(t *testing.T) {
 	saddr, _ := net.ResolveTCPAddr("tcp", "127.0.0.1:32771")
 
 	// Gota Client
-	clientConfig := TunnelActiveConfig{
-		LocalAddr:  nil,
-		RemoteAddr: saddr,
+	clientConfig := []TunnelActiveConfig{
+		{
+			LocalAddr:  nil,
+			RemoteAddr: saddr,
+		},
 	}
 	client := NewGota(clientConfig)
 	caddr := "127.0.0.1:32772"
