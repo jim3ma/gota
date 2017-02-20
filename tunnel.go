@@ -40,16 +40,16 @@ type TunnelManager struct {
 	writeToConnC  chan *GotaFrame
 	readFromConnC chan *GotaFrame
 
-	readPool  chan chan *GotaFrame
-	writePool chan chan *GotaFrame
+	readPool  map[uint32]chan chan *GotaFrame
+	writePool map[uint32]chan chan *GotaFrame
 }
 
 // NewTunnelManager returns a new TunnelManager
 // rc is used for reading fron connection manager
 // wc is used for writing to connection manager
 func NewTunnelManager(rc chan *GotaFrame, wc chan *GotaFrame) *TunnelManager {
-	rp := make(chan chan *GotaFrame)
-	wp := make(chan chan *GotaFrame)
+	rp := make(map[uint32]chan chan *GotaFrame)
+	wp := make(map[uint32]chan chan *GotaFrame)
 	quit := make(chan struct{})
 	mu := &sync.Mutex{}
 	pool := make([]*TunnelTransport, 0)
@@ -113,7 +113,7 @@ func (tm *TunnelManager) Start() {
 		tm.startPassiveMode()
 	}
 	go tm.readDispatch()
-	go tm.writeDispatch()
+	//go tm.writeDispatch()
 }
 
 func (tm *TunnelManager) Stop() {
@@ -124,8 +124,9 @@ func (tm *TunnelManager) Stop() {
 	}
 	tm.stopped = true
 	close(tm.quit)
-	close(tm.readPool)
-	close(tm.writePool)
+	// TODO close all read and write pool
+	//close(tm.readPool)
+	//close(tm.writePool)
 	tm.stopAllTunnelTransport()
 }
 
@@ -230,14 +231,21 @@ func (tm *TunnelManager) listenAndServe(config TunnelPassiveConfig) {
 		log.Infof("TM: User %s, authenticate success, client ID: %d", username, request.clientID)
 		// Authenticate end
 
-		t := NewTunnelTransport(tm.writePool, tm.readPool, conn, request.clientID)
+		client := request.clientID
+		tm.readPool[client] = make(chan chan *GotaFrame)
+		tm.writePool[client] = make(chan chan *GotaFrame)
+
+		t := NewTunnelTransport(tm.writePool[client], tm.readPool[client], conn, client)
 		t.SetCCIDChannel(tm.newCCIDChannel)
 		tm.ttPool = append(tm.ttPool, t)
+
+		//go tm.readDispatchForClient(client)
+		go tm.writeDispatchForClient(client)
 		go t.Start()
 	}
 }
 
-func (tm *TunnelManager) connectAndServe(config TunnelActiveConfig, clientID uint32) {
+func (tm *TunnelManager) connectAndServe(config TunnelActiveConfig, client uint32) {
 	var conn net.Conn
 	var err error
 
@@ -282,7 +290,7 @@ func (tm *TunnelManager) connectAndServe(config TunnelActiveConfig, clientID uin
 
 	request := NewBasicAuthGotaFrame(username, password)
 
-	request.clientID = clientID
+	request.clientID = client
 
 	EmbedClientIDHeaderToPayload(request)
 
@@ -302,22 +310,39 @@ func (tm *TunnelManager) connectAndServe(config TunnelActiveConfig, clientID uin
 	}
 
 	if response.SeqNum != TMTunnelAuthOKSeq {
-		log.Error("TM: Auth error, please check the credential")
+		log.Error("TM: Authenticate error, please check the credential")
 		return
 	}
-	log.Info("TM: Auth success")
+	log.Infof("TM: Authenticate success, client ID: %d", client)
 	// Authenticate end
 
-	t := NewTunnelTransport(tm.writePool, tm.readPool, conn, clientID)
+
+	tm.readPool[client] = make(chan chan *GotaFrame)
+	tm.writePool[client] = make(chan chan *GotaFrame)
+
+	t := NewTunnelTransport(tm.writePool[client], tm.readPool[client], conn, client)
 	tm.ttPool = append(tm.ttPool, t)
+
+	//go tm.readDispatchForClient(client)
+	go tm.writeDispatchForClient(client)
 	t.Start()
 }
 
 func (tm *TunnelManager) readDispatch() {
 	for {
+		gf := <- tm.readFromConnC
+		log.Debugf("TM: Received frame from CM: %s", gf)
+		client := gf.clientID
+		<-tm.readPool[client] <- gf
+	}
+}
+
+func (tm *TunnelManager) readDispatchForClient(client uint32) {
+	pool := tm.readPool[client]
+	for {
 		select {
 		// for TT read
-		case c := <-tm.readPool:
+		case c := <-pool:
 			gf := <-tm.readFromConnC
 			log.Debugf("TM: Received frame from CM: %s", gf)
 			c <- gf
@@ -325,11 +350,12 @@ func (tm *TunnelManager) readDispatch() {
 	}
 }
 
-func (tm *TunnelManager) writeDispatch() {
+func (tm *TunnelManager) writeDispatchForClient(client uint32) {
+	pool := tm.writePool[client]
 	for {
 		select {
 		// for TT write
-		case c := <-tm.writePool:
+		case c := <-pool:
 			gf := <- c
 			log.Debugf("TM: Send frame to CM: %s", gf)
 			tm.writeToConnC <- gf

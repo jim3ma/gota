@@ -29,6 +29,27 @@ func TestGota_ListenAndServe(t *testing.T) {
 	time.Sleep(time.Second * 1200)
 }
 
+func TestGota_ListenAndServe2(t *testing.T) {
+	saddr, _ := net.ResolveTCPAddr("tcp", "127.0.0.1:32771")
+
+	// Gota Client
+	clientConfig := []TunnelActiveConfig{
+		{
+			LocalAddr:  nil,
+			RemoteAddr: saddr,
+		},
+	}
+	client := NewGota(clientConfig)
+	caddr := "127.0.0.1:32770"
+	go client.ListenAndServe(caddr)
+
+	go func() {
+		log.Println(http.ListenAndServe("localhost:6062", nil))
+	}()
+
+	time.Sleep(time.Second * 1200)
+}
+
 func TestGota_Serve(t *testing.T) {
 	go func(){
 		addr, err := net.ResolveTCPAddr("tcp", "127.0.0.1:32773")

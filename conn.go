@@ -2,12 +2,13 @@ package gota
 
 import (
 	log "github.com/Sirupsen/logrus"
+	"encoding/binary"
 	"io"
 	"math"
 	"net"
 	"sync"
 	"time"
-	"math/rand"
+	"crypto/rand"
 )
 
 // CCID combines client ID and connection ID into a uint64 for the key of map struct
@@ -62,7 +63,10 @@ func NewConnManager() *ConnManager {
 	q := make(chan struct{})
 	l := &sync.Mutex{}
 
-	clientID := rand.Uint32()
+	byt := make([]byte, 4)
+	rand.Read(byt)
+	clientID := binary.LittleEndian.Uint32(byt)
+
 	return &ConnManager{
 		clientID: clientID,
 		//mode: 0,
@@ -221,7 +225,7 @@ func (cm *ConnManager) handleNewConn(newChannel chan io.ReadWriteCloser) {
 		log.Debugf("CM: new connection, id: %d", cid)
 		rc := make(chan *GotaFrame)
 		ch := &ConnHandler{
-			ClientID:        0,
+			ClientID:        cm.clientID,
 			ConnID:          cid,
 			rw:              c,
 			WriteToTunnelC:  cm.writeToTunnelC,
@@ -469,6 +473,7 @@ func (ch *ConnHandler) writeToTunnel() {
 		n, err := ch.rw.Read(data)
 		if n > 0 {
 			gf := &GotaFrame{
+				clientID: ch.ClientID,
 				ConnID:  ch.ConnID,
 				SeqNum:  seq,
 				Length:  n,
@@ -505,6 +510,7 @@ func (ch *ConnHandler) writeToTunnel() {
 
 func (ch *ConnHandler) sendCloseGotaFrame() {
 	gf := &GotaFrame{
+		clientID: ch.ClientID,
 		Control: true,
 		ConnID:  ch.ConnID,
 		SeqNum:  TMCloseConnSeq,
@@ -515,6 +521,7 @@ func (ch *ConnHandler) sendCloseGotaFrame() {
 
 func (ch *ConnHandler) sendForceCloseGotaFrame() {
 	gf := &GotaFrame{
+		clientID: ch.ClientID,
 		Control: true,
 		ConnID:  ch.ConnID,
 		SeqNum:  TMCloseConnForceSeq,
