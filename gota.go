@@ -10,6 +10,7 @@ func NewGota(config interface{}) *Gota {
 	tm := NewTunnelManager(cm.WriteToTunnelChannel(), cm.ReadFromTunnelChannel())
 	tm.SetConfig(config)
 	tm.SetCCIDChannel(cm.NewCCIDChannel())
+	tm.clientID = cm.clientID
 
 	return &Gota{
 		ConnManager:   cm,

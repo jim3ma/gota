@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 	"bytes"
-	"math/rand"
 )
 
 type TunnelActiveConfig struct {
@@ -25,6 +24,8 @@ type TunnelPassiveConfig struct {
 }
 
 type TunnelManager struct {
+	// only uesd for active mode
+	clientID uint32
 	mode   int
 	config interface{}
 
@@ -135,8 +136,7 @@ func (tm *TunnelManager) startActiveMode() {
 	}
 	log.Info("TM: Work in Active Mode")
 	for _, c := range config {
-		clientID := rand.Uint32()
-		go tm.connectAndServe(c, clientID)
+		go tm.connectAndServe(c, tm.clientID)
 	}
 }
 
@@ -415,18 +415,12 @@ func (t *TunnelTransport) readFromPeerTunnel() {
 	}()
 	defer Recover()
 	for {
-		header, err := ReadNBytes(t.rw, HeaderLength)
+		gf, err := ReadGotaFrame(t.rw)
 		if err != nil {
-			log.Error("TT: Received gota frame header error, stop this worker")
+			log.Error("TT: Received gota frame error, stop this worker")
 			return
 		}
-
-		var gf GotaFrame
-		err = gf.UnmarshalBinary(header)
-		if err != nil && err != HeaderOnly {
-			log.Error("TT: Error GotaFrame: %+v", header)
-			return
-		}
+		gf.clientID = t.clientID
 
 		log.Debugf("TT: Received gota frame header from peer: %s", gf)
 
@@ -445,7 +439,7 @@ func (t *TunnelTransport) readFromPeerTunnel() {
 				// TODO optimize
 				log.Debug("TT: Received Create Connection OK Signal")
 				t.writePool <- t.writeChannel
-				t.writeChannel <- &gf
+				t.writeChannel <- gf
 
 			case TMCloseTunnelSeq:
 				log.Info("TT: Received Close Tunnel Request, Stop Read!")
@@ -458,21 +452,14 @@ func (t *TunnelTransport) readFromPeerTunnel() {
 			case TMCloseConnSeq:
 				log.Debug("TT: Received Close Connection Signal")
 				t.writePool <- t.writeChannel
-				t.writeChannel <- &gf
+				t.writeChannel <- gf
 			case TMCloseConnForceSeq:
 				log.Debug("TT: Received Force Close Connection Signal")
 				t.writePool <- t.writeChannel
-				t.writeChannel <- &gf
+				t.writeChannel <- gf
 			}
 			continue
 		}
-
-		payload, err := ReadNBytes(t.rw, gf.Length)
-		if err != nil {
-			log.Error("TT: Received gota frame error, stop this worker")
-			return
-		}
-		gf.Payload = payload
 
 		// register the current worker into the worker queue.
 		t.writePool <- t.writeChannel
@@ -480,7 +467,7 @@ func (t *TunnelTransport) readFromPeerTunnel() {
 		log.Debug("TT: Register into the worker queue")
 
 		select {
-		case t.writeChannel <- &gf:
+		case t.writeChannel <- gf:
 		case <-t.quit:
 			return
 		}

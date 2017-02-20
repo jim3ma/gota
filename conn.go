@@ -7,6 +7,7 @@ import (
 	"net"
 	"sync"
 	"time"
+	"math/rand"
 )
 
 // CCID combines client ID and connection ID into a uint64 for the key of map struct
@@ -34,7 +35,7 @@ func (cc CCID) ConnID() uint32 {
 
 // ConnManager manage connections from listening from local port or connecting to remote server
 type ConnManager struct {
-	//clientID uint32
+	clientID uint32
 	//mode int
 	//newConnChannel  chan io.ReadWriteCloser
 
@@ -60,8 +61,10 @@ func NewConnManager() *ConnManager {
 
 	q := make(chan struct{})
 	l := &sync.Mutex{}
+
+	clientID := rand.Uint32()
 	return &ConnManager{
-		//clientID: 0,
+		clientID: clientID,
 		//mode: 0,
 		//newConnChannel: nc,
 
@@ -224,7 +227,7 @@ func (cm *ConnManager) handleNewConn(newChannel chan io.ReadWriteCloser) {
 			WriteToTunnelC:  cm.writeToTunnelC,
 			ReadFromTunnelC: rc,
 		}
-		cm.connHandlerPool[NewCCID(0, cid)] = ch
+		cm.connHandlerPool[NewCCID(cm.clientID, cid)] = ch
 		// TODO send to a work pool for performance reason
 		go func() {
 			log.Debug("CM: Try to create peer connection")
@@ -290,7 +293,7 @@ func (cm *ConnManager) dispatch() {
 			// TODO use work pool to avoid hang here
 			ch.ReadFromTunnelC <- gf
 		} else {
-			log.Errorf("CM: Connection didn't exist, connection id: %d, dropped.", gf.ConnID)
+			log.Errorf("CM: Connection didn't exist, client id: %d, connection id: %d, dropped.", gf.clientID, gf.ConnID)
 		}
 	}
 }
@@ -383,7 +386,7 @@ func (ch *ConnHandler) readFromTunnel() {
 	seq = 0
 	cache := make(map[uint32][]byte)
 
-	log.Debugf("CH: Start to read from tunnel, conn id: %d", ch.ClientID)
+	log.Debugf("CH: Start to read from tunnel, client id: %d", ch.ClientID)
 	for gf := range ch.ReadFromTunnelC {
 		if gf.IsControl() {
 			// TODO control signal handle
@@ -457,7 +460,7 @@ func (ch *ConnHandler) writeToTunnel() {
 	var seq uint32
 	seq = 0
 
-	log.Debugf("CH: Start to write to tunnel, conn id: %d", ch.ClientID)
+	log.Debugf("CH: Start to write to tunnel, client id: %d", ch.ClientID)
 	for {
 		// TODO when to call cache.Put() ?
 		//data := cache.Get().([]byte)

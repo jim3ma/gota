@@ -194,7 +194,10 @@ func ReadGotaFrame(r io.Reader) (*GotaFrame, error) {
 	}
 
 	var gf GotaFrame
-	gf.UnmarshalBinary(header)
+	err = gf.UnmarshalBinary(header)
+	if err != nil && err != HeaderOnly {
+		return nil, err
+	}
 
 	if gf.Control && gf.SeqNum < TMWithoutPayload {
 		return &gf, nil
