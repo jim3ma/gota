@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 )
 
 // GotaFrame struct
@@ -128,18 +129,27 @@ const TMHeartBeatTimeOutSecond = 3000
 const TMStatReportSecond = 30
 
 const (
-	TMHeartBeatPingSeq = iota
+	TMControlStartSeq  = iota
+
+	TMHeartBeatPingSeq
 	TMHeartBeatPongSeq
-	TMTunnelAuthSeq
-	TMTunnelAuthOKSeq
+
 	TMCreateConnSeq
 	TMCreateConnOKSeq
 	TMCreateConnErrorSeq
+
 	TMCloseConnSeq
 	TMCloseConnForceSeq
 	//TMCloseConnOKSeq
+
 	TMCloseTunnelSeq
 	TMCloseTunnelOKSeq
+
+	TMWithoutPayload
+
+	TMTunnelAuthSeq
+	TMTunnelAuthOKSeq
+
 )
 
 const (
@@ -175,6 +185,47 @@ func UnwrapGotaFrame(data []byte) *GotaFrame {
 	var gf GotaFrame
 	gf.UnmarshalBinary(data)
 	return &gf
+}
+
+func ReadGotaFrame(r io.Reader) (*GotaFrame, error) {
+	header, err := ReadNBytes(r, HeaderLength)
+	if err != nil {
+		return nil, err
+	}
+
+	var gf GotaFrame
+	gf.UnmarshalBinary(header)
+
+	if gf.Control && gf.SeqNum < TMWithoutPayload {
+		return &gf, nil
+	}
+
+	payload, err := ReadNBytes(r, gf.Length)
+	if err != nil {
+		return nil, err
+	}
+	gf.Payload = payload
+	return &gf, nil
+}
+
+func EmbedClientIDHeaderToPayload(gf *GotaFrame) {
+	client := make([]byte, 4)
+	binary.LittleEndian.PutUint32(client, gf.clientID)
+
+	payload := make([]byte, 0, gf.Length + 4)
+	payload = append(payload, client...)
+	payload = append(payload, gf.Payload...)
+
+	gf.Payload = payload
+	gf.Length += 4
+}
+
+func ParseClientIDHeaderFromPayload(gf *GotaFrame) {
+	client := binary.LittleEndian.Uint32(gf.Payload[:4])
+
+	gf.Payload = gf.Payload[4:]
+	gf.Length -= 4
+	gf.clientID = client
 }
 
 func init() {

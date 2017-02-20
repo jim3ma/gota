@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 	"bytes"
+	"math/rand"
 )
 
 type TunnelActiveConfig struct {
@@ -134,7 +135,8 @@ func (tm *TunnelManager) startActiveMode() {
 	}
 	log.Info("TM: Work in Active Mode")
 	for _, c := range config {
-		go tm.connectAndServe(c)
+		clientID := rand.Uint32()
+		go tm.connectAndServe(c, clientID)
 	}
 }
 
@@ -192,34 +194,25 @@ func (tm *TunnelManager) listenAndServe(config TunnelPassiveConfig) {
 		// TODO set Client ID
 
 		// Authenticate start
-		header, err := ReadNBytes(conn, HeaderLength)
+		username := "gota"
+		password := "gota"
+
+		request, err := ReadGotaFrame(conn)
 		if err != nil {
-			log.Error("TM: Received gota frame header error, stop auth")
+			log.Error("TM: Received gota frame header error: %s, stop auth", err)
 			conn.Close()
 			continue
 		}
-
-		var request GotaFrame
-		request.UnmarshalBinary(header)
 
 		if request.SeqNum != TMTunnelAuthSeq {
 			log.Error("TM: Auth header error, close connection")
 			conn.Close()
 			continue
 		}
-		username := "gota"
-		password := "gota"
 
-		payload, err := ReadNBytes(conn, request.Length)
-		if err != nil {
-			log.Error("TM: Received gota frame error, close connection")
-			conn.Close()
-			continue
-		}
-		request.Payload = payload
-
+		ParseClientIDHeaderFromPayload(request)
 		if bytes.Compare(
-			BasicAuthGotaFrame(username, password).Payload,
+			NewBasicAuthGotaFrame(username, password).Payload,
 			request.Payload,
 			) != 0 {
 
@@ -227,23 +220,24 @@ func (tm *TunnelManager) listenAndServe(config TunnelPassiveConfig) {
 			conn.Close()
 			continue
 		}
+
 		err = WriteNBytes(conn, len(TMTunnelAuthOKBytes), TMTunnelAuthOKBytes)
 		if err != nil {
 			log.Error("TM: Write gota frame header error, close connection")
 			conn.Close()
 			continue
 		}
-		log.Infof("TM: User %s, authenticate success", username)
+		log.Infof("TM: User %s, authenticate success, client ID: %d", username, request.clientID)
 		// Authenticate end
 
-		t := NewTunnelTransport(tm.writePool, tm.readPool, conn)
+		t := NewTunnelTransport(tm.writePool, tm.readPool, conn, request.clientID)
 		t.SetCCIDChannel(tm.newCCIDChannel)
 		tm.ttPool = append(tm.ttPool, t)
 		go t.Start()
 	}
 }
 
-func (tm *TunnelManager) connectAndServe(config TunnelActiveConfig) {
+func (tm *TunnelManager) connectAndServe(config TunnelActiveConfig, clientID uint32) {
 	var conn net.Conn
 	var err error
 
@@ -280,9 +274,18 @@ func (tm *TunnelManager) connectAndServe(config TunnelActiveConfig) {
 
 	log.Infof("TM: Connected remote: %s", conn.RemoteAddr())
 
-	// TODO hard code credential
 	// Authenticate start
-	request := BasicAuthGotaFrame("gota", "gota")
+
+	// TODO hard code credential
+	username := "gota"
+	password := "gota"
+
+	request := NewBasicAuthGotaFrame(username, password)
+
+	request.clientID = clientID
+
+	EmbedClientIDHeaderToPayload(request)
+
 	rawBytes, _ := request.MarshalBinary()
 	err = WriteNBytes(conn, len(rawBytes), rawBytes)
 	if err != nil {
@@ -291,15 +294,12 @@ func (tm *TunnelManager) connectAndServe(config TunnelActiveConfig) {
 		return
 	}
 
-	header, err := ReadNBytes(conn, HeaderLength)
+	response, err := ReadGotaFrame(conn)
 	if err != nil {
 		// TODO retry
-		log.Error("TM: Received gota frame header error, stop auth")
+		log.Errorf("TM: Received gota frame header error: %s, stop auth", err)
 		return
 	}
-
-	var response GotaFrame
-	response.UnmarshalBinary(header)
 
 	if response.SeqNum != TMTunnelAuthOKSeq {
 		log.Error("TM: Auth error, please check the credential")
@@ -308,7 +308,7 @@ func (tm *TunnelManager) connectAndServe(config TunnelActiveConfig) {
 	log.Info("TM: Auth success")
 	// Authenticate end
 
-	t := NewTunnelTransport(tm.writePool, tm.readPool, conn)
+	t := NewTunnelTransport(tm.writePool, tm.readPool, conn, clientID)
 	tm.ttPool = append(tm.ttPool, t)
 	t.Start()
 }

@@ -109,7 +109,7 @@ func CompareGotaFrame(a, b *GotaFrame) bool {
 	return false
 }
 
-func BasicAuthGotaFrame(username, password string) *GotaFrame {
+func NewBasicAuthGotaFrame(username, password string) *GotaFrame {
 	auth := username + ":" + password
 	authBytes := []byte(base64.StdEncoding.EncodeToString([]byte(auth)))
 
