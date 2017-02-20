@@ -1,6 +1,7 @@
 package gota
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	log "github.com/Sirupsen/logrus"
@@ -10,7 +11,6 @@ import (
 	"net/url"
 	"sync"
 	"time"
-	"bytes"
 )
 
 type TunnelActiveConfig struct {
@@ -26,8 +26,8 @@ type TunnelPassiveConfig struct {
 type TunnelManager struct {
 	// only uesd for active mode
 	clientID uint32
-	mode   int
-	config interface{}
+	mode     int
+	config   interface{}
 
 	quit    chan struct{}
 	stopped bool
@@ -168,7 +168,7 @@ func (tm *TunnelManager) listenAndServe(config TunnelPassiveConfig) {
 		case <-tm.quit:
 			log.Info("TM: Received quit signal")
 			listener.Close()
-		case <- restart:
+		case <-restart:
 		}
 	}()
 
@@ -189,7 +189,6 @@ func (tm *TunnelManager) listenAndServe(config TunnelPassiveConfig) {
 				close(restart)
 			}
 		}
-
 
 		log.Infof("TM: Accept Connection from: %s", conn.RemoteAddr())
 		// TODO set Client ID
@@ -215,7 +214,7 @@ func (tm *TunnelManager) listenAndServe(config TunnelPassiveConfig) {
 		if bytes.Compare(
 			NewBasicAuthGotaFrame(username, password).Payload,
 			request.Payload,
-			) != 0 {
+		) != 0 {
 
 			log.Error("TM: Auth credentail error, close connection")
 			conn.Close()
@@ -316,7 +315,6 @@ func (tm *TunnelManager) connectAndServe(config TunnelActiveConfig, client uint3
 	log.Infof("TM: Authenticate success, client ID: %d", client)
 	// Authenticate end
 
-
 	tm.readPool[client] = make(chan chan *GotaFrame)
 	tm.writePool[client] = make(chan chan *GotaFrame)
 
@@ -330,7 +328,7 @@ func (tm *TunnelManager) connectAndServe(config TunnelActiveConfig, client uint3
 
 func (tm *TunnelManager) readDispatch() {
 	for {
-		gf := <- tm.readFromConnC
+		gf := <-tm.readFromConnC
 		log.Debugf("TM: Received frame from CM: %s", gf)
 		client := gf.clientID
 		<-tm.readPool[client] <- gf
@@ -356,7 +354,7 @@ func (tm *TunnelManager) writeDispatchForClient(client uint32) {
 		select {
 		// for TT write
 		case c := <-pool:
-			gf := <- c
+			gf := <-c
 			log.Debugf("TM: Send frame to CM: %s", gf)
 			tm.writeToConnC <- gf
 		}

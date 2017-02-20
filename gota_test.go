@@ -1,11 +1,11 @@
 package gota
 
 import (
-	"testing"
-	"net"
-	"time"
-	"net/http"
 	log "github.com/Sirupsen/logrus"
+	"net"
+	"net/http"
+	"testing"
+	"time"
 )
 
 func TestGota_ListenAndServe(t *testing.T) {
@@ -13,6 +13,14 @@ func TestGota_ListenAndServe(t *testing.T) {
 
 	// Gota Client
 	clientConfig := []TunnelActiveConfig{
+		{
+			LocalAddr:  nil,
+			RemoteAddr: saddr,
+		},
+		{
+			LocalAddr:  nil,
+			RemoteAddr: saddr,
+		},
 		{
 			LocalAddr:  nil,
 			RemoteAddr: saddr,
@@ -51,7 +59,7 @@ func TestGota_ListenAndServe2(t *testing.T) {
 }
 
 func TestGota_Serve(t *testing.T) {
-	go func(){
+	go func() {
 		addr, err := net.ResolveTCPAddr("tcp", "127.0.0.1:32773")
 		if err != nil {
 			log.Debug(err)
@@ -60,7 +68,7 @@ func TestGota_Serve(t *testing.T) {
 		if err != nil {
 			log.Debug(err)
 		}
-		conn, _ :=l.AcceptTCP()
+		conn, _ := l.AcceptTCP()
 		for {
 			data := make([]byte, 65536)
 			n, _ := conn.Read(data)

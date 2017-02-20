@@ -371,7 +371,7 @@ func helpServe(conn *net.TCPConn, t *testing.T) {
 			}
 
 			if err != nil {
-				t.Error("Write to conn error: %s", err)
+				t.Errorf("Write to conn error: %s", err)
 			}
 			time.Sleep(time.Second * 1)
 		}

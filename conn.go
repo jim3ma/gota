@@ -1,14 +1,14 @@
 package gota
 
 import (
-	log "github.com/Sirupsen/logrus"
+	"crypto/rand"
 	"encoding/binary"
+	log "github.com/Sirupsen/logrus"
 	"io"
 	"math"
 	"net"
 	"sync"
 	"time"
-	"crypto/rand"
 )
 
 // CCID combines client ID and connection ID into a uint64 for the key of map struct
@@ -63,9 +63,9 @@ func NewConnManager() *ConnManager {
 	q := make(chan struct{})
 	l := &sync.Mutex{}
 
-	byt := make([]byte, 4)
-	rand.Read(byt)
-	clientID := binary.LittleEndian.Uint32(byt)
+	d := make([]byte, 4)
+	rand.Read(d)
+	clientID := binary.LittleEndian.Uint32(d)
 
 	return &ConnManager{
 		clientID: clientID,
@@ -142,7 +142,6 @@ func (cm *ConnManager) ListenAndServe(addr string) error {
 		log.Debugf("CM: Received new connection from %s", conn.RemoteAddr())
 		newConnChannel <- conn
 	}
-	return nil
 }
 
 // Serve just waits request for new connections from tunnel
@@ -474,10 +473,10 @@ func (ch *ConnHandler) writeToTunnel() {
 		if n > 0 {
 			gf := &GotaFrame{
 				clientID: ch.ClientID,
-				ConnID:  ch.ConnID,
-				SeqNum:  seq,
-				Length:  n,
-				Payload: data[:n],
+				ConnID:   ch.ConnID,
+				SeqNum:   seq,
+				Length:   n,
+				Payload:  data[:n],
 			}
 			log.Debugf("CH: Received data from conn, %s", gf)
 			seq += 1
@@ -511,10 +510,10 @@ func (ch *ConnHandler) writeToTunnel() {
 func (ch *ConnHandler) sendCloseGotaFrame() {
 	gf := &GotaFrame{
 		clientID: ch.ClientID,
-		Control: true,
-		ConnID:  ch.ConnID,
-		SeqNum:  TMCloseConnSeq,
-		Length:  0,
+		Control:  true,
+		ConnID:   ch.ConnID,
+		SeqNum:   TMCloseConnSeq,
+		Length:   0,
 	}
 	ch.WriteToTunnelC <- gf
 }
@@ -522,10 +521,10 @@ func (ch *ConnHandler) sendCloseGotaFrame() {
 func (ch *ConnHandler) sendForceCloseGotaFrame() {
 	gf := &GotaFrame{
 		clientID: ch.ClientID,
-		Control: true,
-		ConnID:  ch.ConnID,
-		SeqNum:  TMCloseConnForceSeq,
-		Length:  0,
+		Control:  true,
+		ConnID:   ch.ConnID,
+		SeqNum:   TMCloseConnForceSeq,
+		Length:   0,
 	}
 	ch.WriteToTunnelC <- gf
 }

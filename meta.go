@@ -129,7 +129,7 @@ const TMHeartBeatTimeOutSecond = 3000
 const TMStatReportSecond = 30
 
 const (
-	TMControlStartSeq  = iota
+	TMControlStartSeq = iota
 
 	TMHeartBeatPingSeq
 	TMHeartBeatPongSeq
@@ -149,7 +149,6 @@ const (
 
 	TMTunnelAuthSeq
 	TMTunnelAuthOKSeq
-
 )
 
 const (
@@ -215,7 +214,7 @@ func EmbedClientIDHeaderToPayload(gf *GotaFrame) {
 	client := make([]byte, 4)
 	binary.LittleEndian.PutUint32(client, gf.clientID)
 
-	payload := make([]byte, 0, gf.Length + 4)
+	payload := make([]byte, 0, gf.Length+4)
 	payload = append(payload, client...)
 	payload = append(payload, gf.Payload...)
 
