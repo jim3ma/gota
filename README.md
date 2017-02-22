@@ -24,6 +24,5 @@ Contributions are welcome.
 
 Copyright 2013-2017 Jim Ma
 
-This software is licensed under the terms of the GNU General Public License Version 3. See the [LICENSE](./LICENSE) file.
-
+This software is licensed under the terms of the Apache License Version 2. See the [LICENSE](./LICENSE) file.
 
