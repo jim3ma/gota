@@ -40,7 +40,12 @@ type GotaFrame struct {
 
 // String for logging
 func (gf GotaFrame) String() string {
-	return fmt.Sprintf("{ Control: %v, ConnID: %d, SeqNum: %d, Length: %d }", gf.Control, gf.ConnID, gf.SeqNum, gf.Length)
+	if gf.Control{
+		return fmt.Sprintf("{ Control Signal: %s, ConnID: %d, Length: %d }",
+			TMControlSignalMap[gf.SeqNum], gf.ConnID, gf.Length)
+	}
+	return fmt.Sprintf("{ Control: %v, ConnID: %d, SeqNum: %d, Length: %d }",
+		gf.Control, gf.ConnID, gf.SeqNum, gf.Length)
 }
 
 // IsControl return if this frame is a control type
@@ -169,6 +174,8 @@ var TMCloseTunnelOKGotaFrame *GotaFrame
 var TMTunnelAuthOKBytes []byte
 var TMTunnelAuthOKGotaFrame *GotaFrame
 
+var TMControlSignalMap map[uint32]string
+
 const HeaderLength = 10
 
 var HeaderOnly = errors.New("Gota Header Only")
@@ -270,4 +277,19 @@ func init() {
 		SeqNum:  uint32(TMTunnelAuthOKSeq),
 	}
 	TMTunnelAuthOKBytes = WrapGotaFrame(TMTunnelAuthOKGotaFrame)
+
+
+	TMControlSignalMap = make(map[uint32]string,8)
+
+	TMControlSignalMap[TMHeartBeatPingSeq]="HeartBeatPing"
+	TMControlSignalMap[TMHeartBeatPongSeq]="HeartBeatPong"
+	TMControlSignalMap[TMCreateConnSeq]="CreateConn"
+	TMControlSignalMap[TMCreateConnOKSeq]="CreateConnOK"
+	TMControlSignalMap[TMCreateConnErrorSeq]="CreateConnError"
+	TMControlSignalMap[TMCloseConnSeq]="CloseConn"
+	TMControlSignalMap[TMCloseConnForceSeq]="CloseConnForce"
+	TMControlSignalMap[TMCloseTunnelSeq]="CloseTunnel"
+	TMControlSignalMap[TMCloseTunnelOKSeq]="CloseTunnelOK"
+	TMControlSignalMap[TMTunnelAuthSeq]="TunnelAuth"
+	TMControlSignalMap[TMTunnelAuthOKSeq]="TunnelAuthOK"
 }
