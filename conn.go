@@ -41,6 +41,8 @@ type ConnManager struct {
 	//newConnChannel  chan io.ReadWriteCloser
 
 	newCCIDChannel  chan CCID
+
+	poolLock        sync.RWMutex
 	connHandlerPool map[CCID]*ConnHandler
 
 	writeToTunnelC  chan *GotaFrame
@@ -62,6 +64,7 @@ func NewConnManager() *ConnManager {
 
 	q := make(chan struct{})
 	l := &sync.Mutex{}
+	ml := sync.RWMutex{}
 
 	d := make([]byte, 4)
 	rand.Read(d)
@@ -78,8 +81,9 @@ func NewConnManager() *ConnManager {
 		writeToTunnelC:  wc,
 		readFromTunnelC: rc,
 
-		quit:  q,
-		mutex: l,
+		quit:     q,
+		mutex:    l,
+		poolLock: ml,
 	}
 }
 
@@ -202,7 +206,11 @@ func (cm *ConnManager) dialAndCreateCH(cc CCID, addr *net.TCPAddr) {
 		WriteToTunnelC:  cm.writeToTunnelC,
 		ReadFromTunnelC: rc,
 	}
+
+	cm.poolLock.Lock()
 	cm.connHandlerPool[cc] = ch
+	cm.poolLock.Unlock()
+
 	go ch.Start()
 
 	// send response after created the connection
@@ -230,7 +238,9 @@ func (cm *ConnManager) handleNewConn(newChannel chan io.ReadWriteCloser) {
 			WriteToTunnelC:  cm.writeToTunnelC,
 			ReadFromTunnelC: rc,
 		}
+		cm.poolLock.Lock()
 		cm.connHandlerPool[NewCCID(cm.clientID, cid)] = ch
+		cm.poolLock.Unlock()
 		// TODO send to a work pool for performance reason
 		go func() {
 			log.Debug("CM: Try to create peer connection")
@@ -257,11 +267,13 @@ func (cm *ConnManager) cleanCHPool() {
 		case <-cm.quit:
 			return
 		case <-time.After(time.Second * 60):
+			cm.poolLock.Lock()
 			for k, v := range cm.connHandlerPool {
 				if v.Stopped() {
 					delete(cm.connHandlerPool, k)
 				}
 			}
+			cm.poolLock.Unlock()
 		}
 	}
 }
@@ -283,6 +295,8 @@ func (cm *ConnManager) Stop() {
 }
 
 func (cm *ConnManager) stopAllConnHandler() {
+	cm.poolLock.Lock()
+	defer cm.poolLock.Unlock()
 	for k, v := range cm.connHandlerPool {
 		v.Stop()
 		delete(cm.connHandlerPool, k)
@@ -292,12 +306,14 @@ func (cm *ConnManager) stopAllConnHandler() {
 func (cm *ConnManager) dispatch() {
 	for gf := range cm.readFromTunnelC {
 		log.Debugf("CM: Received frame from tunnel: %s", gf)
+		cm.poolLock.RLock()
 		if ch, ok := cm.connHandlerPool[NewCCID(gf.clientID, gf.ConnID)]; ok {
 			// TODO use work pool to avoid hang here
 			ch.ReadFromTunnelC <- gf
 		} else {
 			log.Errorf("CM: Connection didn't exist, client id: %d, connection id: %d, dropped.", gf.clientID, gf.ConnID)
 		}
+		cm.poolLock.RUnlock()
 	}
 }
 
