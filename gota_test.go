@@ -25,6 +25,18 @@ func TestGota_ListenAndServe(t *testing.T) {
 			LocalAddr:  nil,
 			RemoteAddr: saddr,
 		},
+		{
+			LocalAddr:  nil,
+			RemoteAddr: saddr,
+		},
+		{
+			LocalAddr:  nil,
+			RemoteAddr: saddr,
+		},
+		{
+			LocalAddr:  nil,
+			RemoteAddr: saddr,
+		},
 	}
 	client := NewGota(clientConfig)
 	caddr := "127.0.0.1:32772"
@@ -83,8 +95,8 @@ func TestGota_Serve(t *testing.T) {
 		TCPAddr: saddr,
 	}
 	server := NewGota(serverConfig)
-	raddr := "baidu.com:80"
-	//raddr := "127.0.0.1:32773"
+	//raddr := "baidu.com:80"
+	raddr := "127.0.0.1:3000"
 	go server.Serve(raddr)
 
 	go func() {

@@ -231,8 +231,13 @@ func (tm *TunnelManager) listenAndServe(config TunnelPassiveConfig) {
 		// Authenticate end
 
 		client := request.clientID
-		tm.readPool[client] = make(chan chan *GotaFrame)
-		tm.writePool[client] = make(chan chan *GotaFrame)
+
+		if _, ok := tm.readPool[client]; ! ok {
+			tm.readPool[client] = make(chan chan *GotaFrame)
+		}
+		if _, ok := tm.writePool[client]; ! ok {
+			tm.writePool[client] = make(chan chan *GotaFrame)
+		}
 
 		t := NewTunnelTransport(tm.writePool[client], tm.readPool[client], conn, client)
 		t.SetCCIDChannel(tm.newCCIDChannel)
@@ -315,8 +320,12 @@ func (tm *TunnelManager) connectAndServe(config TunnelActiveConfig, client uint3
 	log.Infof("TM: Authenticate success, client ID: %d", client)
 	// Authenticate end
 
-	tm.readPool[client] = make(chan chan *GotaFrame)
-	tm.writePool[client] = make(chan chan *GotaFrame)
+	if _, ok := tm.readPool[client]; ! ok {
+		tm.readPool[client] = make(chan chan *GotaFrame)
+	}
+	if _, ok := tm.writePool[client]; ! ok {
+		tm.writePool[client] = make(chan chan *GotaFrame)
+	}
 
 	t := NewTunnelTransport(tm.writePool[client], tm.readPool[client], conn, client)
 	tm.ttPool = append(tm.ttPool, t)
@@ -350,6 +359,10 @@ func (tm *TunnelManager) readDispatchForClient(client uint32) {
 
 func (tm *TunnelManager) writeDispatchForClient(client uint32) {
 	pool := tm.writePool[client]
+
+	if tm.clientID != 0 {
+		log.Infof("TM: Launch Write Dispatch for Client: %d, Write Pool: %d", client, &pool)
+	}
 	for {
 		select {
 		// for TT write
@@ -486,9 +499,9 @@ func (t *TunnelTransport) readFromPeerTunnel() {
 		}
 
 		// register the current worker into the worker queue.
+		log.Debug("TT: Try to register into the write worker queue")
 		t.writePool <- t.writeChannel
-
-		log.Debug("TT: Register into the worker queue")
+		log.Debug("TT: Registered into the write worker queue")
 
 		select {
 		case t.writeChannel <- gf:
@@ -517,6 +530,7 @@ func (t *TunnelTransport) writeToPeerTunnel() {
 		select {
 		// register the current worker into the worker queue.
 		case t.readPool <- t.readChannel:
+			log.Debugf("TT: Registered into the read worker queue: %d", &t.readPool)
 		case gf := <-t.readChannel:
 			// we have received a write request.
 			log.Debugf("TT: Send data frame header to peer: %s", gf)
