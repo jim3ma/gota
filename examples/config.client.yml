@@ -1,14 +1,19 @@
+# default for server, did not change it
 mode: client
 
+# log level: info debug warn error fatal panic
 log: debug
 
+# tunnel authenticate credentail
 auth:
   username: gota
   password: gota
 
+# local listen address with port
 listen: 127.0.0.1:12363
 
+# Gota server addresses with port
 tunnel:
-  - remote: 127.0.0.1:12333
+  - remote: 127.0.0.1:12333 # connect server directly
   #- remote: 127.0.0.1:12336
-    # proxy: http://gota:gota@127.0.0.1:3128
+  #  proxy: http://gota:gota@127.0.0.1:3128 # connect server using proxy, currently Gota support http/https/socks5 proxy

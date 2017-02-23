@@ -1,13 +1,19 @@
+# default for server, did not change it
 mode: server
 
+# log level: info debug warn error fatal panic
 log: debug
 
+# tunnel authenticate credentail
 auth:
   username: gota
   password: gota
 
+# remote address with port for forwarding traffic
+# suppose you want to speed up you 8080 port
 remote: 127.0.0.1:8080
 
+# tunnel listen address with port
 tunnel:
   - listen: 127.0.0.1:12333
   - listen: 127.0.0.1:12336

@@ -10,7 +10,99 @@ Sometimes, our network administrator enables rate-limiting for every tcp connect
 
 ## Quick Start
 
-We can use Gota as a library, client or server.
+We can use Gota as a library, or daemon.
+
+### Use Gota as Daemon
+
+#### Get Gota binary
+
+* Build from source
+
+```shell
+go get github.com/jim3ma/gota/gota
+```
+
+Or
+
+* [TBD] Download from [Release](https://github.com/jim3ma/gota/releases) page according to you os and arch
+
+#### Update Server Configuration
+
+> PS: the config files already exist in `examples`, you can make a reference.
+
+* Update and save as config.server.yml
+
+```yml
+# default for server, did not change it
+mode: server
+
+# log level: info debug warn error fatal panic
+log: debug
+
+# tunnel authenticate credentail
+auth:
+  username: gota
+  password: gota
+
+# remote address with port for forwarding traffic
+# suppose you want to speed up you 8080 port
+remote: 127.0.0.1:8080
+
+# tunnel listen address with port
+tunnel:
+  - listen: 127.0.0.1:12333
+  - listen: 127.0.0.1:12336
+```
+
+* Launch Server
+
+```shell
+gota server --config config.server.yml
+```
+
+#### Update Client Configuration
+
+* Update and save as config.client.yml
+
+```yml
+# default for server, did not change it
+mode: client
+
+# log level: info debug warn error fatal panic
+log: debug
+
+# tunnel authenticate credentail
+auth:
+  username: gota
+  password: gota
+
+# local listen address with port
+listen: 127.0.0.1:12363
+
+# Gota server addresses with port
+tunnel:
+  - remote: 127.0.0.1:12333 # connect server directly
+  - remote: 127.0.0.1:12336
+    proxy: http://gota:gota@127.0.0.1:3128 # connect server using a proxy, currently Gota support http/https/socks5 proxy
+```
+
+* Launch Client
+
+```shell
+gota client --config config.client.yml
+```
+
+#### Try yourself
+
+```shell
+telnet 127.0.0.1:12363
+# or
+curl 127.0.0.1:12363
+```
+
+### Use Gota as a library
+
+TBD
 
 ## Architecture
 
