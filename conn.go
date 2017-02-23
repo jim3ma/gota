@@ -40,7 +40,7 @@ type ConnManager struct {
 	//mode int
 	//newConnChannel  chan io.ReadWriteCloser
 
-	newCCIDChannel  chan CCID
+	newCCIDChannel chan CCID
 
 	poolLock        sync.RWMutex
 	connHandlerPool map[CCID]*ConnHandler
@@ -115,6 +115,7 @@ func (cm *ConnManager) ListenAndServe(addr string) error {
 		panic(err)
 	}
 
+	go cm.cleanCHPool()
 	go cm.dispatch()
 
 	newConnChannel := make(chan io.ReadWriteCloser)
@@ -155,6 +156,8 @@ func (cm *ConnManager) Serve(addr string) {
 	if err != nil {
 		panic(err)
 	}
+
+	go cm.cleanCHPool()
 	go cm.dispatch()
 	cm.handleNewCCID(tcpAddr)
 }
@@ -308,11 +311,15 @@ func (cm *ConnManager) dispatch() {
 		log.Debugf("CM: Received frame from tunnel: %s", gf)
 		cm.poolLock.RLock()
 		if ch, ok := cm.connHandlerPool[NewCCID(gf.clientID, gf.ConnID)]; ok {
-			// TODO use work pool to avoid hang here
+			// TODO avoid hang here
 			ch.ReadFromTunnelC <- gf
 		} else {
 			log.Errorf("CM: Connection didn't exist, client id: %d, connection id: %d, dropped.", gf.clientID, gf.ConnID)
 		}
+		//if gf.IsControl() && (gf.SeqNum == TMCloseConnSeq || gf.SeqNum == TMCloseConnForceSeq) {
+		//	log.Debugf("CM: Received close connection signal for connection %d, delete it from connection pool", gf.ConnID)
+		//	delete(cm.connHandlerPool, NewCCID(gf.clientID, gf.ConnID))
+		//}
 		cm.poolLock.RUnlock()
 	}
 }
@@ -390,7 +397,14 @@ func (ch *ConnHandler) CreatePeerConn() bool {
 }
 
 func (ch *ConnHandler) readFromTunnel() {
+	drop := func(c chan *GotaFrame) {
+		for gf := range c {
+			log.Warnf("CH: Connecition %d closed, Gota Frame dropped", gf.ConnID)
+		}
+	}
 	defer func() {
+		go drop(ch.ReadFromTunnelC)
+
 		if cw, ok := ch.rw.(RWCloseWriter); ok {
 			cw.CloseWrite()
 		} else {
@@ -406,14 +420,15 @@ func (ch *ConnHandler) readFromTunnel() {
 	cache := make(map[uint32][]byte)
 
 	log.Debugf("CH: Start to read from tunnel, client id: %d", ch.ClientID)
+
 	for gf := range ch.ReadFromTunnelC {
 		if gf.IsControl() {
 			// TODO control signal handle
 			if gf.SeqNum == TMCloseConnSeq {
-				log.Debug("CH: Received close connection signal")
+				log.Debugf("CH: Received close connection signal for connection %d", gf.ConnID)
 				return
 			} else if gf.SeqNum == TMCloseConnForceSeq {
-				log.Debug("CH: Received force close connection signal")
+				log.Warnf("CH: Received force close connection signal for connection %d", gf.ConnID)
 				ch.rw.Close()
 				return
 			}
@@ -497,7 +512,7 @@ func (ch *ConnHandler) writeToTunnel() {
 			log.Debugf("CH: Received data from conn, %s", gf)
 			seq += 1
 			ch.WriteToTunnelC <- gf
-		} else if err != io.EOF {
+		} else if n == 0 && err != io.EOF {
 			log.Warn("CH: Received empty data from connection")
 		}
 
@@ -513,10 +528,9 @@ func (ch *ConnHandler) writeToTunnel() {
 			ch.mutex.Lock()
 			defer ch.mutex.Unlock()
 
-			if ch.writeStopped {
-				return
-			} else {
-				log.Errorf("CH: Read from connection error %+v", err)
+			// ignore error for force stop
+			if !ch.writeStopped {
+				log.Errorf("CH: Read from connection error: %+v", err)
 			}
 			return
 		}

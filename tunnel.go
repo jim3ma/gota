@@ -234,10 +234,10 @@ func (tm *TunnelManager) listenAndServe(config TunnelPassiveConfig) {
 		client := request.clientID
 
 		tm.poolLock.Lock()
-		if _, ok := tm.readPool[client]; ! ok {
+		if _, ok := tm.readPool[client]; !ok {
 			tm.readPool[client] = make(chan chan *GotaFrame)
 		}
-		if _, ok := tm.writePool[client]; ! ok {
+		if _, ok := tm.writePool[client]; !ok {
 			tm.writePool[client] = make(chan chan *GotaFrame)
 		}
 		tm.poolLock.Unlock()
@@ -327,10 +327,10 @@ func (tm *TunnelManager) connectAndServe(config TunnelActiveConfig, client uint3
 	// Authenticate end
 
 	tm.poolLock.Lock()
-	if _, ok := tm.readPool[client]; ! ok {
+	if _, ok := tm.readPool[client]; !ok {
 		tm.readPool[client] = make(chan chan *GotaFrame)
 	}
-	if _, ok := tm.writePool[client]; ! ok {
+	if _, ok := tm.writePool[client]; !ok {
 		tm.writePool[client] = make(chan chan *GotaFrame)
 	}
 	tm.poolLock.Unlock()
@@ -477,7 +477,6 @@ func (t *TunnelTransport) readFromPeerTunnel() {
 		log.Debugf("TT: Received gota frame header from peer: %s", gf)
 
 		if gf.IsControl() {
-			log.Debug("TT: Process Control Signal")
 			switch gf.SeqNum {
 			case TMHeartBeatPingSeq:
 				go t.sendHeartBeatResponse()
