@@ -40,6 +40,7 @@ type TunnelManager struct {
 	writeToConnC  chan *GotaFrame
 	readFromConnC chan *GotaFrame
 
+	poolLock  sync.RWMutex
 	readPool  map[uint32]chan chan *GotaFrame
 	writePool map[uint32]chan chan *GotaFrame
 }
@@ -232,14 +233,19 @@ func (tm *TunnelManager) listenAndServe(config TunnelPassiveConfig) {
 
 		client := request.clientID
 
+		tm.poolLock.Lock()
 		if _, ok := tm.readPool[client]; ! ok {
 			tm.readPool[client] = make(chan chan *GotaFrame)
 		}
 		if _, ok := tm.writePool[client]; ! ok {
 			tm.writePool[client] = make(chan chan *GotaFrame)
 		}
+		tm.poolLock.Unlock()
 
+		tm.poolLock.RLock()
 		t := NewTunnelTransport(tm.writePool[client], tm.readPool[client], conn, client)
+		tm.poolLock.RUnlock()
+
 		t.SetCCIDChannel(tm.newCCIDChannel)
 		tm.ttPool = append(tm.ttPool, t)
 
@@ -320,14 +326,19 @@ func (tm *TunnelManager) connectAndServe(config TunnelActiveConfig, client uint3
 	log.Infof("TM: Authenticate success, client ID: %d", client)
 	// Authenticate end
 
+	tm.poolLock.Lock()
 	if _, ok := tm.readPool[client]; ! ok {
 		tm.readPool[client] = make(chan chan *GotaFrame)
 	}
 	if _, ok := tm.writePool[client]; ! ok {
 		tm.writePool[client] = make(chan chan *GotaFrame)
 	}
+	tm.poolLock.Unlock()
 
+	tm.poolLock.RLock()
 	t := NewTunnelTransport(tm.writePool[client], tm.readPool[client], conn, client)
+	tm.poolLock.RUnlock()
+
 	tm.ttPool = append(tm.ttPool, t)
 
 	//go tm.readDispatchForClient(client)
@@ -340,12 +351,16 @@ func (tm *TunnelManager) readDispatch() {
 		gf := <-tm.readFromConnC
 		log.Debugf("TM: Received frame from CM: %s", gf)
 		client := gf.clientID
+		tm.poolLock.RLock()
 		<-tm.readPool[client] <- gf
+		tm.poolLock.RUnlock()
 	}
 }
 
 func (tm *TunnelManager) readDispatchForClient(client uint32) {
+	tm.poolLock.RLock()
 	pool := tm.readPool[client]
+	tm.poolLock.RUnlock()
 	for {
 		select {
 		// for TT read
