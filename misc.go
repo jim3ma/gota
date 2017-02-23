@@ -6,6 +6,8 @@ import (
 	"errors"
 	"io"
 	"time"
+	log "github.com/Sirupsen/logrus"
+	"strings"
 )
 
 // Statistic contains the traffic status
@@ -120,4 +122,23 @@ func NewBasicAuthGotaFrame(username, password string) *GotaFrame {
 		Payload: authBytes,
 	}
 	return gf
+}
+
+func SetLogLevel(l string) {
+	switch  strings.ToLower(l){
+	case "info":
+		log.SetLevel(log.InfoLevel)
+	case "debug":
+		log.SetLevel(log.DebugLevel)
+	case "error":
+		log.SetLevel(log.ErrorLevel)
+	case "warn":
+		log.SetLevel(log.WarnLevel)
+	case "fatal":
+		log.SetLevel(log.FatalLevel)
+	case "panic":
+		log.SetLevel(log.PanicLevel)
+	default:
+		log.SetLevel(log.DebugLevel)
+	}
 }
