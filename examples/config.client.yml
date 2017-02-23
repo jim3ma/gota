@@ -1,0 +1,14 @@
+mode: client
+
+log: debug
+
+auth:
+  username: gota
+  password: gota
+
+listen: 127.0.0.1:12363
+
+tunnel:
+  - remote: 127.0.0.1:12333
+  #- remote: 127.0.0.1:12336
+    # proxy: http://gota:gota@127.0.0.1:3128

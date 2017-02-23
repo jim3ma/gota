@@ -1,0 +1,13 @@
+mode: server
+
+log: debug
+
+auth:
+  username: gota
+  password: gota
+
+remote: 127.0.0.1:8080
+
+tunnel:
+  - listen: 127.0.0.1:12333
+  - listen: 127.0.0.1:12336
