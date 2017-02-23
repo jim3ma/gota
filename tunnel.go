@@ -469,7 +469,7 @@ func (t *TunnelTransport) readFromPeerTunnel() {
 	for {
 		gf, err := ReadGotaFrame(t.rw)
 		if err != nil {
-			log.Error("TT: Received gota frame error, stop this worker")
+			log.Errorf("TT: Received gota frame error, stop this worker, error: %s", err)
 			return
 		}
 		gf.clientID = t.clientID
@@ -544,6 +544,7 @@ func (t *TunnelTransport) writeToPeerTunnel() {
 	tick := time.NewTicker(time.Second * TMHeartBeatTickerSecond)
 
 	log.Info("TT: Start to forward Gota Frame to peer tunnel")
+Loop:
 	for {
 		select {
 		// register the current worker into the worker queue.
@@ -555,24 +556,26 @@ func (t *TunnelTransport) writeToPeerTunnel() {
 			rawBytes, err := gf.MarshalBinary()
 			if err != nil && nil != HeaderOnly {
 				log.Errorf("TT: Marshal GotaFrame error: %+v, skip", err)
-				continue
+				continue Loop
 			}
 			err = WriteNBytes(t.rw, len(rawBytes), rawBytes)
 			if err != nil && nil != io.EOF {
 				log.Error("TT: Write gota frame error, stop this worker")
-				break
+				break Loop
 			}
 
 		case <-time.After(time.Second * TMHeartBeatSecond):
-			if t.sendHeartBeatRequest() != nil {
-				log.Error("TT: Send heartbeat failed, stop this worker")
-				break
+			err := t.sendHeartBeatRequest()
+			if err != nil {
+				log.Errorf("TT: Send heartbeat failed, stop this worker, error: \"%s\"", err)
+				break Loop
 			}
 			log.Info("TT: Sent Hearbeat Ping")
 		case <-tick.C:
-			if t.sendHeartBeatRequest() != nil {
-				log.Error("TT: Send heartbeat failed, stop this worker")
-				break
+			err := t.sendHeartBeatRequest()
+			if err != nil {
+				log.Errorf("TT: Send heartbeat failed, stop this worker, error: \"%s\"", err)
+				break Loop
 			}
 			log.Info("TT: Sent Hearbeat Ping")
 		case <-t.quit:

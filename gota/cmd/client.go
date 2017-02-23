@@ -17,10 +17,12 @@ package cmd
 import (
 	"fmt"
 	log "github.com/Sirupsen/logrus"
-	"github.com/spf13/cobra"
-        "github.com/spf13/viper"
 	"github.com/jim3ma/gota"
+	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 	"net"
+	"net/http"
+	_ "net/http/pprof"
 	"net/url"
 )
 
@@ -50,6 +52,10 @@ to quickly create a Cobra application.`,
 		if err != nil {
 			log.Errorf("Gota: Error Listen Address: %s", viper.GetString("listen"))
 		}
+
+		go func() {
+			log.Println(http.ListenAndServe("localhost:6061", nil))
+		}()
 
 		tunnel := viper.Get("tunnel")
 		if t, ok := tunnel.([]interface{}); ok {

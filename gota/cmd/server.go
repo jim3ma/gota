@@ -16,12 +16,14 @@ package cmd
 
 import (
 	"fmt"
-	"net"
 	log "github.com/Sirupsen/logrus"
+	"net"
 
-	"github.com/spf13/cobra"
-        "github.com/spf13/viper"
 	"github.com/jim3ma/gota"
+	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
+	"net/http"
+	_ "net/http/pprof"
 )
 
 // serverCmd represents the server command
@@ -50,6 +52,10 @@ to quickly create a Cobra application.`,
 		if err != nil {
 			log.Errorf("Gota: Error Remote Address: %s", viper.GetString("remote"))
 		}
+
+		go func() {
+			log.Println(http.ListenAndServe("localhost:6060", nil))
+		}()
 
 		tunnel := viper.Get("tunnel")
 		if t, ok := tunnel.([]interface{}); ok {

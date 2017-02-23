@@ -128,8 +128,8 @@ const MaxConnID = 1<<31 - 1
 const ControlFlagBit = 1 << 31
 
 // Connection Manage HeartBeat Time
-const TMHeartBeatSecond = 300
-const TMHeartBeatTickerSecond = 900
+const TMHeartBeatSecond = 60
+const TMHeartBeatTickerSecond = 600
 const TMHeartBeatTimeOutSecond = 3000
 const TMStatReportSecond = 30
 
