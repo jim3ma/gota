@@ -491,6 +491,10 @@ func (t *TunnelTransport) readFromPeerTunnel() {
 				log.Debug("TT: Received Create Connection OK Signal")
 				t.writePool <- t.writeChannel
 				t.writeChannel <- gf
+			case TMCreateConnErrorSeq:
+				log.Debug("TT: Received Create Connection Error Signal")
+				t.writePool <- t.writeChannel
+				t.writeChannel <- gf
 
 			case TMCloseTunnelSeq:
 				log.Info("TT: Received Close Tunnel Request, Stop Read!")

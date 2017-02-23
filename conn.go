@@ -115,7 +115,7 @@ func (cm *ConnManager) ListenAndServe(addr string) error {
 		panic(err)
 	}
 
-	go cm.cleanCHPool()
+	go cm.cleanUpCHPool()
 	go cm.dispatch()
 
 	newConnChannel := make(chan io.ReadWriteCloser)
@@ -157,14 +157,15 @@ func (cm *ConnManager) Serve(addr string) {
 		panic(err)
 	}
 
-	go cm.cleanCHPool()
+	go cm.cleanUpCHPool()
 	go cm.dispatch()
 	cm.handleNewCCID(tcpAddr)
 }
 
 func (cm *ConnManager) handleNewCCID(addr *net.TCPAddr) {
 	for cc := range cm.newCCIDChannel {
-		log.Debugf("CM: New CCID comes from tunnel, CCID: %d", cc)
+		log.Debugf("CM: New CCID comes from tunnel, CCID: %d, Client ID: %d, ConnID: %d",
+			cc, cc.ClientID(), cc.ConnID())
 		go cm.dialAndCreateCH(cc, addr)
 	}
 }
@@ -180,8 +181,8 @@ func (cm *ConnManager) dialAndCreateCH(cc CCID, addr *net.TCPAddr) {
 		} else {
 			retry += 1
 			sec := int32(math.Exp2(float64(retry)))
-			log.Debugf("CM: Create a new connection to remote error: %s, retry %d times after %d seconds",
-				err, retry, sec)
+			log.Debugf("CM: Create a new connection to remote error: \"%s\", retry after %d seconds",
+				err, sec)
 			time.Sleep(time.Second * time.Duration(sec))
 		}
 
@@ -234,12 +235,15 @@ func (cm *ConnManager) handleNewConn(newChannel chan io.ReadWriteCloser) {
 		// create and start a new ConnHandler with a new connection id, than append to cm.connHandlerPool
 		log.Debugf("CM: new connection, id: %d", cid)
 		rc := make(chan *GotaFrame)
+
+		mu := &sync.Mutex{}
 		ch := &ConnHandler{
 			ClientID:        cm.clientID,
 			ConnID:          cid,
 			rw:              c,
 			WriteToTunnelC:  cm.writeToTunnelC,
 			ReadFromTunnelC: rc,
+			mutex:           mu,
 		}
 		cm.poolLock.Lock()
 		cm.connHandlerPool[NewCCID(cm.clientID, cid)] = ch
@@ -248,8 +252,12 @@ func (cm *ConnManager) handleNewConn(newChannel chan io.ReadWriteCloser) {
 		go func() {
 			log.Debug("CM: Try to create peer connection")
 			if !ch.CreatePeerConn() {
-				log.Error("CM: Create peer connection error")
 				// destroy the unused connection handler
+				cm.poolLock.Lock()
+				ch.Stop()
+				delete(cm.connHandlerPool, NewCCID(cm.clientID, cid))
+				cm.poolLock.Unlock()
+
 				return
 			}
 			log.Debug("CM: Created peer connection")
@@ -264,7 +272,7 @@ func (cm *ConnManager) handleNewConn(newChannel chan io.ReadWriteCloser) {
 	}
 }
 
-func (cm *ConnManager) cleanCHPool() {
+func (cm *ConnManager) cleanUpCHPool() {
 	for {
 		select {
 		case <-cm.quit:
@@ -391,6 +399,9 @@ func (ch *ConnHandler) CreatePeerConn() bool {
 	if resp.Control && resp.SeqNum == TMCreateConnOKSeq {
 		log.Debugf("CH: Create peer connection success, response: %s", resp)
 		return true
+	} else if resp.Control && resp.SeqNum == TMCreateConnErrorSeq {
+		log.Debugf("CH: Create peer connection failed, response: %s", resp)
+		return false
 	}
 	log.Errorf("CH: Wrong response from tunnel for creating a peer connection, frame: %s", resp)
 	return false

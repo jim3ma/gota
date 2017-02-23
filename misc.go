@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"encoding/base64"
 	"errors"
-	"io"
-	"time"
 	log "github.com/Sirupsen/logrus"
+	"io"
 	"strings"
+	"time"
 )
 
 // Statistic contains the traffic status
@@ -125,7 +125,7 @@ func NewBasicAuthGotaFrame(username, password string) *GotaFrame {
 }
 
 func SetLogLevel(l string) {
-	switch  strings.ToLower(l){
+	switch strings.ToLower(l) {
 	case "info":
 		log.SetLevel(log.InfoLevel)
 	case "debug":
