@@ -12,15 +12,15 @@ import (
 //
 // First bit is Control flag, 1 for control, 0 for normal
 // when control flag is 1, length must be 0
-// ┏━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-// ┃ 1 bit ┃    connection id: 31 bit      ┃ 4 bytes, 1 bit for control flag, and 31 bit for connection id
-// ┣━━━━━━━┻━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫
-// ┃        sequence number: 32 bit        ┃ 4 bytes for sequence number
-// ┣━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┫
-// ┃  length: 16 bit    ┃      data        ┃ 2 bytes for data length
-// ┣━━━━━━━━━━━━━━━━━━━━┻━━━━━━━━━━━━━━━━━━┫
-// ┃             data(continue)            ┃ data: length bit
-// ┃                   ...                 ┃
+// +-------+-------------------------------+
+// | 1 bit |    connection id: 31 bit      | 4 bytes, 1 bit for control flag, and 31 bit for connection id
+// +-------+-------------------------------+
+// |        sequence number: 32 bit        | 4 bytes for sequence number
+// +--------------------+------------------+
+// |  length: 16 bit    |      data        | 2 bytes for data length
+// +--------------------+------------------+
+// |             data(continue)            | data: length bit
+// |                   ...                 |
 
 type GotaFrame struct {
 	// Control

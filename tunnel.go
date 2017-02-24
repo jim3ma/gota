@@ -517,9 +517,9 @@ func (t *TunnelTransport) readFromPeerTunnel() {
 		}
 
 		// register the current worker into the worker queue.
-		log.Debug("TT: Try to register into the write worker queue")
+		//log.Debug("TT: Try to register into the write worker queue")
 		t.writePool <- t.writeChannel
-		log.Debug("TT: Registered into the write worker queue")
+		//log.Debug("TT: Registered into the write worker queue")
 
 		select {
 		case t.writeChannel <- gf:
@@ -549,7 +549,8 @@ Loop:
 		select {
 		// register the current worker into the worker queue.
 		case t.readPool <- t.readChannel:
-			log.Debugf("TT: Registered into the read worker queue: %d", &t.readPool)
+			continue
+			//log.Debugf("TT: Registered into the read worker queue: %d", &t.readPool)
 		case gf := <-t.readChannel:
 			// we have received a write request.
 			log.Debugf("TT: Send data frame header to peer: %s", gf)

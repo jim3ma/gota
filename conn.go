@@ -12,9 +12,9 @@ import (
 )
 
 // CCID combines client ID and connection ID into a uint64 for the key of map struct
-// ┏━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━┓
-// ┃   client id: 32 bit   ┃ connection id: 32 bit ┃
-// ┗━━━━━━━━━━━━━━━━━━━━━━━┻━━━━━━━━━━━━━━━━━━━━━━━┛
+// +-----------------------+-----------------------+
+// |   client id: 32 bit   | connection id: 32 bit |
+// +-----------------------+-----------------------+
 type CCID uint64
 
 // NewCCID return a new CCID with client id and conn id
