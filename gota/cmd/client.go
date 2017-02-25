@@ -57,6 +57,9 @@ to quickly create a Cobra application.`,
 			log.Println(http.ListenAndServe("localhost:6061", nil))
 		}()
 
+		userName := viper.GetString("auth.username")
+		password := viper.GetString("auth.password")
+
 		tunnel := viper.Get("tunnel")
 		if t, ok := tunnel.([]interface{}); ok {
 			clientConfig := make([]gota.TunnelActiveConfig, len(t))
@@ -77,7 +80,11 @@ to quickly create a Cobra application.`,
 					log.Errorf("Gota: Cann't parse tunnel config: %s", v)
 				}
 			}
-			client := gota.NewGota(clientConfig)
+			client := gota.NewGota(clientConfig,
+				&gota.TunnelAuthCredential{
+					UserName: userName,
+					Password: password,
+				})
 			client.ListenAndServe(viper.GetString("listen"))
 		} else {
 			log.Error("Gota: Cann't parse tunnel config")

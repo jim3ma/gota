@@ -4,7 +4,7 @@ mode: server
 # log level: info debug warn error fatal panic
 log: debug
 
-# tunnel authenticate credentail
+# tunnel authenticate credential
 auth:
   username: gota
   password: gota
