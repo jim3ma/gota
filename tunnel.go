@@ -68,6 +68,7 @@ func NewTunnelManager(rc chan *GotaFrame, wc chan *GotaFrame, auth *TunnelAuthCr
 		readFromConnC: rc,
 		writeToConnC:  wc,
 
+		poolLock:  sync.RWMutex{},
 		readPool:  rp,
 		writePool: wp,
 
@@ -113,6 +114,12 @@ func (tm *TunnelManager) SetCCIDChannel(c chan CCID) {
 	tm.mutex.Lock()
 	defer tm.mutex.Unlock()
 	tm.newCCIDChannel = c
+}
+
+func (tm *TunnelManager) SetClientID(c uint32) {
+	tm.mutex.Lock()
+	defer tm.mutex.Unlock()
+	tm.clientID = c
 }
 
 func (tm *TunnelManager) Start() {
@@ -374,23 +381,15 @@ func (tm *TunnelManager) readDispatch() {
 		log.Debugf("TM: Received frame from CM: %s", gf)
 		client := gf.clientID
 		tm.poolLock.RLock()
-		<-tm.readPool[client] <- gf
-		tm.poolLock.RUnlock()
-	}
-}
 
-func (tm *TunnelManager) readDispatchForClient(client uint32) {
-	tm.poolLock.RLock()
-	pool := tm.readPool[client]
-	tm.poolLock.RUnlock()
-	for {
-		select {
-		// for TT read
-		case c := <-pool:
-			gf := <-tm.readFromConnC
-			log.Debugf("TM: Received frame from CM: %s", gf)
-			c <- gf
+		// bug fixed for hang in listenAndServe
+		pool, ok := tm.readPool[client]
+		if !ok {
+			log.Errorf("TM: Read Pool for client %d didn't exist", client)
+			continue
 		}
+		tm.poolLock.RUnlock()
+		<-pool <- gf
 	}
 }
 

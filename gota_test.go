@@ -46,7 +46,7 @@ func TestGota_ListenAndServe(t *testing.T) {
 		log.Println(http.ListenAndServe("localhost:6060", nil))
 	}()
 
-	time.Sleep(time.Second * 1200)
+	time.Sleep(time.Second * 10)
 }
 
 func TestGota_ListenAndServe2(t *testing.T) {
@@ -67,7 +67,7 @@ func TestGota_ListenAndServe2(t *testing.T) {
 		log.Println(http.ListenAndServe("localhost:6062", nil))
 	}()
 
-	time.Sleep(time.Second * 1200)
+	time.Sleep(time.Second * 10)
 }
 
 func TestGota_Serve(t *testing.T) {
@@ -94,7 +94,7 @@ func TestGota_Serve(t *testing.T) {
 	serverConfig := TunnelPassiveConfig{
 		TCPAddr: saddr,
 	}
-	server := NewGota(serverConfig)
+	server := NewGota(serverConfig, nil)
 	//raddr := "baidu.com:80"
 	raddr := "127.0.0.1:3000"
 	go server.Serve(raddr)
@@ -103,5 +103,5 @@ func TestGota_Serve(t *testing.T) {
 		log.Println(http.ListenAndServe("localhost:6061", nil))
 	}()
 
-	time.Sleep(time.Second * 1200)
+	time.Sleep(time.Second * 10)
 }

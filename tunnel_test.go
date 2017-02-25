@@ -7,11 +7,12 @@ import (
 
 	log "github.com/Sirupsen/logrus"
 	"net"
+	"net/http"
 	"time"
 )
 
 func TestTunnelManager_SetConfig(t *testing.T) {
-	tm := NewTunnelManager(nil, nil)
+	tm := NewTunnelManager(nil, nil, nil)
 	ac := TunnelActiveConfig{}
 	if err := tm.SetConfig(ac); err != nil {
 		t.Errorf("Set config for tunnel manager error: %s", err)
@@ -147,6 +148,10 @@ func Test_bidirectBuffer(t *testing.T) {
 }
 
 func TestTunnelTransport_Start(t *testing.T) {
+	go func() {
+		log.Println(http.ListenAndServe("localhost:6069", nil))
+	}()
+
 	buf := newBidirectBuffer()
 	e1, e2 := buf.Ends()
 
@@ -214,20 +219,29 @@ func TestTunnelTransport_Start(t *testing.T) {
 }
 
 func TestTunnelManager_Start(t *testing.T) {
-	addr, _ := net.ResolveTCPAddr("tcp", "127.0.0.1:32770")
+	addr, _ := net.ResolveTCPAddr("tcp", "127.0.0.1:32779")
+	client := uint32(0)
 
 	rc1 := make(chan *GotaFrame)
 	wc1 := make(chan *GotaFrame)
-	tm1 := NewTunnelManager(rc1, wc1)
+	tm1 := NewTunnelManager(rc1, wc1, nil)
+
+	//tm1.readPool[client] = make(chan chan *GotaFrame)
+	//tm1.writePool[client] = make(chan chan *GotaFrame)
+
 	pc := TunnelPassiveConfig{
 		TCPAddr: addr,
 	}
 	tm1.SetConfig(pc)
 	tm1.Start()
 
+	time.Sleep(time.Second * 1)
 	rc2 := make(chan *GotaFrame)
 	wc2 := make(chan *GotaFrame)
-	tm2 := NewTunnelManager(rc2, wc2)
+	tm2 := NewTunnelManager(rc2, wc2, nil)
+
+	//tm2.readPool[client] = make(chan chan *GotaFrame)
+	//tm2.writePool[client] = make(chan chan *GotaFrame)
 
 	ac := TunnelActiveConfig{
 		LocalAddr:  nil,
@@ -236,35 +250,48 @@ func TestTunnelManager_Start(t *testing.T) {
 	tm2.SetConfig(ac)
 	tm2.Start()
 
-	payload := []byte("payload")
+	done := make(chan struct{})
+	go func() {
+		time.Sleep(time.Second * 3)
+		payload := []byte("payload")
 
-	gf1 := &GotaFrame{
-		Control: false,
-		ConnID:  0,
-		SeqNum:  0,
-		Length:  len(payload),
-		Payload: payload,
-	}
+		gf1 := &GotaFrame{
+			clientID: client,
+			Control:  false,
+			ConnID:   0,
+			SeqNum:   0,
+			Length:   len(payload),
+			Payload:  payload,
+		}
 
-	rc1 <- gf1
-	gf2 := <-wc2
+		rc1 <- gf1
+		gf2 := <-wc2
 
-	if !CompareGotaFrame(gf1, gf2) {
-		t.Errorf("Error Gota Frame received, wanted %s, but received %s", gf1, gf2)
-	}
+		if !CompareGotaFrame(gf1, gf2) {
+			t.Errorf("Error Gota Frame received, wanted %s, but received %s", gf1, gf2)
+		}
 
-	gf3 := &GotaFrame{
-		Control: false,
-		ConnID:  1,
-		SeqNum:  0,
-		Length:  len(payload),
-		Payload: payload,
-	}
+		gf3 := &GotaFrame{
+			clientID: client,
+			Control:  false,
+			ConnID:   1,
+			SeqNum:   0,
+			Length:   len(payload),
+			Payload:  payload,
+		}
 
-	rc2 <- gf3
-	gf4 := <-wc1
+		rc2 <- gf3
+		gf4 := <-wc1
 
-	if !CompareGotaFrame(gf3, gf4) {
-		t.Errorf("Error Gota Frame received, wanted %s, but received %s", gf3, gf4)
+		if !CompareGotaFrame(gf3, gf4) {
+			t.Errorf("Error Gota Frame received, wanted %s, but received %s", gf3, gf4)
+		}
+
+		done <- struct{}{}
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second * 10):
+		t.Error("Error: timeout")
 	}
 }

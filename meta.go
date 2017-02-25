@@ -69,6 +69,10 @@ func (gf *GotaFrame) MarshalBinary() (data []byte, err error) {
 	binary.LittleEndian.PutUint32(seq, gf.SeqNum)
 	buf.Write(seq)
 
+	if len(gf.Payload) != gf.Length {
+		return nil, ErrInsufficientData
+	}
+
 	var l uint16
 	if gf.Length == MaxDataLength {
 		l = 0
@@ -210,11 +214,8 @@ func ReadGotaFrame(r io.Reader) (*GotaFrame, error) {
 		return nil, err
 	}
 
-	//if gf.Control && gf.SeqNum < TMWithoutPayloadBoundary {
-	//	return &gf, nil
-	//}
-
-	if gf.Length == 0 {
+	// if gf.Control && gf.Length == 0 is a better sulution ?
+	if gf.Control && gf.SeqNum < TMWithoutPayloadBoundary {
 		return &gf, nil
 	}
 

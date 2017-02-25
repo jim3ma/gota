@@ -224,11 +224,11 @@ func TestConnManager_handleNewConn(t *testing.T) {
 	resp := &GotaFrame{
 		Control:  true,
 		ConnID:   0,
-		clientID: 0,
+		clientID: cm.clientID,
 		SeqNum:   TMCreateConnOKSeq,
 		Length:   0,
 	}
-	cm.connHandlerPool[NewCCID(0, 0)].ReadFromTunnelC <- resp
+	cm.connHandlerPool[NewCCID(cm.clientID, 0)].ReadFromTunnelC <- resp
 
 	// received
 	go func() {
@@ -237,7 +237,7 @@ func TestConnManager_handleNewConn(t *testing.T) {
 			if c.IsControl() {
 				continue
 			}
-			cm.connHandlerPool[NewCCID(0, 0)].ReadFromTunnelC <- c
+			cm.connHandlerPool[NewCCID(cm.clientID, 0)].ReadFromTunnelC <- c
 		}
 	}()
 
@@ -247,12 +247,12 @@ func TestConnManager_handleNewConn(t *testing.T) {
 	gf := &GotaFrame{
 		Control:  true,
 		ConnID:   0,
-		clientID: 0,
+		clientID: cm.clientID,
 		SeqNum:   TMCloseConnSeq,
 		Length:   0,
 	}
 
-	cm.connHandlerPool[NewCCID(0, 0)].ReadFromTunnelC <- gf
+	cm.connHandlerPool[NewCCID(cm.clientID, 0)].ReadFromTunnelC <- gf
 
 	time.Sleep(time.Second * 1)
 	for _, ch := range cm.connHandlerPool {
@@ -287,7 +287,7 @@ func TestConnManager_handleNewCCID(t *testing.T) {
 	}()
 
 	//log.Info(cm.connHandlerPool[NewCCID(0, 0)].Stopped())
-	time.Sleep(time.Second * 30)
+	time.Sleep(time.Second * 10)
 	cm.Stop()
 	//log.Info(cm.connHandlerPool[NewCCID(0, 0)].Stopped())
 }
@@ -315,14 +315,13 @@ func TestConnManager_ListenAndServe(t *testing.T) {
 	resp := &GotaFrame{
 		Control:  true,
 		ConnID:   0,
-		clientID: 0,
+		clientID: cm.clientID,
 		SeqNum:   TMCreateConnOKSeq,
 		Length:   0,
 	}
 	rc <- resp
 
 	go func() {
-
 		for gf := range wc {
 			log.Debugf("forward frame: %s", gf)
 			rc <- gf
