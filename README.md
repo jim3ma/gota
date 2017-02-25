@@ -39,7 +39,7 @@ mode: server
 # log level: info debug warn error fatal panic
 log: debug
 
-# tunnel authenticate credentail
+# tunnel authenticate credential
 auth:
   username: gota
   password: gota
@@ -71,7 +71,7 @@ mode: client
 # log level: info debug warn error fatal panic
 log: debug
 
-# tunnel authenticate credentail
+# tunnel authenticate credential
 auth:
   username: gota
   password: gota
@@ -83,7 +83,8 @@ listen: 127.0.0.1:12363
 tunnel:
   - remote: 127.0.0.1:12333 # connect server directly
   - remote: 127.0.0.1:12336
-    proxy: http://gota:gota@127.0.0.1:3128 # connect server using a proxy, currently Gota support http/https/socks5 proxy
+    # connect server using a proxy, currently Gota support http/https/socks5 proxy
+    proxy: http://gota:gota@127.0.0.1:3128
 ```
 
 * Launch Client

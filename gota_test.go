@@ -38,7 +38,7 @@ func TestGota_ListenAndServe(t *testing.T) {
 			RemoteAddr: saddr,
 		},
 	}
-	client := NewGota(clientConfig)
+	client := NewGota(clientConfig, nil)
 	caddr := "127.0.0.1:32772"
 	go client.ListenAndServe(caddr)
 
@@ -59,7 +59,7 @@ func TestGota_ListenAndServe2(t *testing.T) {
 			RemoteAddr: saddr,
 		},
 	}
-	client := NewGota(clientConfig)
+	client := NewGota(clientConfig, nil)
 	caddr := "127.0.0.1:32770"
 	go client.ListenAndServe(caddr)
 

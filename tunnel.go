@@ -13,6 +13,11 @@ import (
 	"time"
 )
 
+type TunnelAuthCredential struct {
+	UserName string
+	Password string
+}
+
 type TunnelActiveConfig struct {
 	LocalAddr  *net.TCPAddr
 	RemoteAddr *net.TCPAddr
@@ -24,6 +29,7 @@ type TunnelPassiveConfig struct {
 }
 
 type TunnelManager struct {
+	auth *TunnelAuthCredential
 	// only uesd for active mode
 	clientID uint32
 	mode     int
@@ -46,15 +52,17 @@ type TunnelManager struct {
 }
 
 // NewTunnelManager returns a new TunnelManager
-// rc is used for reading fron connection manager
+// rc is used for reading from connection manager
 // wc is used for writing to connection manager
-func NewTunnelManager(rc chan *GotaFrame, wc chan *GotaFrame) *TunnelManager {
+func NewTunnelManager(rc chan *GotaFrame, wc chan *GotaFrame, auth *TunnelAuthCredential) *TunnelManager {
 	rp := make(map[uint32]chan chan *GotaFrame)
 	wp := make(map[uint32]chan chan *GotaFrame)
 	quit := make(chan struct{})
 	mu := &sync.Mutex{}
 	pool := make([]*TunnelTransport, 0)
 	return &TunnelManager{
+		auth: auth,
+
 		newCCIDChannel: nil,
 
 		readFromConnC: rc,
@@ -195,8 +203,15 @@ func (tm *TunnelManager) listenAndServe(config TunnelPassiveConfig) {
 		// TODO set Client ID
 
 		// Authenticate start
-		username := "gota"
-		password := "gota"
+		var username string
+		var password string
+		if tm.auth == nil {
+			username = "gota"
+			password = "gota"
+		} else {
+			username = tm.auth.UserName
+			password = tm.auth.Password
+		}
 
 		request, err := ReadGotaFrame(conn)
 		if err != nil {
@@ -216,8 +231,8 @@ func (tm *TunnelManager) listenAndServe(config TunnelPassiveConfig) {
 			NewBasicAuthGotaFrame(username, password).Payload,
 			request.Payload,
 		) != 0 {
-
-			log.Error("TM: Auth credentail error, close connection")
+			log.Errorf("TM: Authentication credential error, close connection from client: %d", request.clientID)
+			WriteNBytes(conn, len(TMTunnelAuthErrBytes), TMTunnelAuthErrBytes)
 			conn.Close()
 			continue
 		}
@@ -228,7 +243,7 @@ func (tm *TunnelManager) listenAndServe(config TunnelPassiveConfig) {
 			conn.Close()
 			continue
 		}
-		log.Infof("TM: User %s, authenticate success, client ID: %d", username, request.clientID)
+		log.Infof("TM: User %s, authentication success, client ID: %d", username, request.clientID)
 		// Authenticate end
 
 		client := request.clientID
@@ -293,10 +308,15 @@ func (tm *TunnelManager) connectAndServe(config TunnelActiveConfig, client uint3
 	log.Infof("TM: Connected remote: %s", conn.RemoteAddr())
 
 	// Authenticate start
-
-	// TODO hard code credential
-	username := "gota"
-	password := "gota"
+	var username string
+	var password string
+	if tm.auth == nil {
+		username = "gota"
+		password = "gota"
+	} else {
+		username = tm.auth.UserName
+		password = tm.auth.Password
+	}
 
 	request := NewBasicAuthGotaFrame(username, password)
 
@@ -319,11 +339,13 @@ func (tm *TunnelManager) connectAndServe(config TunnelActiveConfig, client uint3
 		return
 	}
 
+	log.Debugf("TM: Received authentication response gota frame: %s", response)
+
 	if response.SeqNum != TMTunnelAuthOKSeq {
-		log.Error("TM: Authenticate error, please check the credential")
+		log.Error("TM: Authentication error, please check the credential")
 		return
 	}
-	log.Infof("TM: Authenticate success, client ID: %d", client)
+	log.Infof("TM: Authentication success, client ID: %d", client)
 	// Authenticate end
 
 	tm.poolLock.Lock()

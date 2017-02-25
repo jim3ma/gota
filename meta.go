@@ -150,10 +150,13 @@ const (
 	TMCloseTunnelSeq
 	TMCloseTunnelOKSeq
 
-	TMWithoutPayload
+	TMTunnelAuthOKSeq
+	TMTunnelAuthErrSeq
+
+	// when a signal big than the boundary, it will contain a payload
+	TMWithoutPayloadBoundary
 
 	TMTunnelAuthSeq
-	TMTunnelAuthOKSeq
 )
 
 const (
@@ -173,6 +176,8 @@ var TMCloseTunnelOKBytes []byte
 var TMCloseTunnelOKGotaFrame *GotaFrame
 var TMTunnelAuthOKBytes []byte
 var TMTunnelAuthOKGotaFrame *GotaFrame
+var TMTunnelAuthErrBytes []byte
+var TMTunnelAuthErrGotaFrame *GotaFrame
 
 var TMControlSignalMap map[uint32]string
 
@@ -205,7 +210,11 @@ func ReadGotaFrame(r io.Reader) (*GotaFrame, error) {
 		return nil, err
 	}
 
-	if gf.Control && gf.SeqNum < TMWithoutPayload {
+	//if gf.Control && gf.SeqNum < TMWithoutPayloadBoundary {
+	//	return &gf, nil
+	//}
+
+	if gf.Length == 0 {
 		return &gf, nil
 	}
 
@@ -278,6 +287,14 @@ func init() {
 	}
 	TMTunnelAuthOKBytes = WrapGotaFrame(TMTunnelAuthOKGotaFrame)
 
+	TMTunnelAuthErrGotaFrame = &GotaFrame{
+		Control: true,
+		ConnID:  uint32(0),
+		Length:  0,
+		SeqNum:  uint32(TMTunnelAuthErrSeq),
+	}
+	TMTunnelAuthErrBytes = WrapGotaFrame(TMTunnelAuthErrGotaFrame)
+
 	TMControlSignalMap = make(map[uint32]string, 8)
 
 	TMControlSignalMap[TMHeartBeatPingSeq] = "HeartBeatPing"
@@ -291,4 +308,5 @@ func init() {
 	TMControlSignalMap[TMCloseTunnelOKSeq] = "CloseTunnelOK"
 	TMControlSignalMap[TMTunnelAuthSeq] = "TunnelAuth"
 	TMControlSignalMap[TMTunnelAuthOKSeq] = "TunnelAuthOK"
+	TMControlSignalMap[TMTunnelAuthErrSeq] = "TunnelAuthErr"
 }
