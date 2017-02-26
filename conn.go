@@ -41,12 +41,15 @@ type ConnManager struct {
 	//newConnChannel  chan io.ReadWriteCloser
 
 	newCCIDChannel chan CCID
+	cleanUpCHChan  chan CCID
 
-	poolLock        sync.RWMutex
+	poolLock        *sync.RWMutex
 	connHandlerPool map[CCID]*ConnHandler
 
 	writeToTunnelC  chan *GotaFrame
 	readFromTunnelC chan *GotaFrame
+
+	fastOpen bool
 
 	quit    chan struct{}
 	stopped bool
@@ -57,14 +60,14 @@ type ConnManager struct {
 // We should use the channels of this ConnManager to set up TunnelMangager
 func NewConnManager() *ConnManager {
 	ncc := make(chan CCID)
+	clean := make(chan CCID)
 	chPool := make(map[CCID](*ConnHandler))
-
 	wc := make(chan *GotaFrame)
 	rc := make(chan *GotaFrame)
 
 	q := make(chan struct{})
 	l := &sync.Mutex{}
-	ml := sync.RWMutex{}
+	ml := &sync.RWMutex{}
 
 	d := make([]byte, 4)
 	rand.Read(d)
@@ -76,11 +79,13 @@ func NewConnManager() *ConnManager {
 		//newConnChannel: nc,
 
 		newCCIDChannel:  ncc,
+		cleanUpCHChan:   clean,
 		connHandlerPool: chPool,
 
 		writeToTunnelC:  wc,
 		readFromTunnelC: rc,
 
+		fastOpen: false,
 		quit:     q,
 		mutex:    l,
 		poolLock: ml,
@@ -90,6 +95,10 @@ func NewConnManager() *ConnManager {
 // NewCCIDChannel returns the newCCIDChannel for creating a new connection
 func (cm *ConnManager) NewCCIDChannel() chan CCID {
 	return cm.newCCIDChannel
+}
+
+func (cm *ConnManager) EnableFastOpen() {
+	cm.fastOpen = true
 }
 
 // WriteToTunnelChannel returns the channel to write to tunnel
@@ -174,6 +183,7 @@ func (cm *ConnManager) dialAndCreateCH(cc CCID, addr *net.TCPAddr) {
 	var conn io.ReadWriteCloser
 	var err error
 	retry := 0
+	log.Debugf("CM: Dial remote for ClientID: %d, ConnID: %d", cc.ClientID(), cc.ConnID())
 	for {
 		conn, err = net.DialTCP("tcp", nil, addr)
 		if err == nil {
@@ -189,6 +199,8 @@ func (cm *ConnManager) dialAndCreateCH(cc CCID, addr *net.TCPAddr) {
 		if retry >= MaxRetryTimes {
 			log.Debugf("CM: Create a new connection to remote error after retry %d times", retry)
 
+			// TODO enable fast open
+
 			// send response after created the connection error
 			resp := &GotaFrame{
 				Control:  true,
@@ -202,30 +214,36 @@ func (cm *ConnManager) dialAndCreateCH(cc CCID, addr *net.TCPAddr) {
 			return
 		}
 	}
-	rc := make(chan *GotaFrame)
+	log.Debugf("CM: Dial remote complete for ClientID: %d, ConnID: %d", cc.ClientID(), cc.ConnID())
+	rc := make(chan *GotaFrame, 1)
 	ch := &ConnHandler{
 		ClientID:        cc.ClientID(),
 		ConnID:          cc.ConnID(),
 		rw:              conn,
+		cleanUpCHChan:   cm.cleanUpCHChan,
 		WriteToTunnelC:  cm.writeToTunnelC,
 		ReadFromTunnelC: rc,
 	}
+
+	go ch.Start()
 
 	cm.poolLock.Lock()
 	cm.connHandlerPool[cc] = ch
 	cm.poolLock.Unlock()
 
-	go ch.Start()
 
-	// send response after created the connection
-	resp := &GotaFrame{
-		Control:  true,
-		ConnID:   cc.ConnID(),
-		clientID: cc.ClientID(),
-		SeqNum:   TMCreateConnOKSeq,
-		Length:   0,
+	// TODO enable fast open
+	if ! cm.fastOpen {
+		// send response after created the connection
+		resp := &GotaFrame{
+			Control:  true,
+			ConnID:   cc.ConnID(),
+			clientID: cc.ClientID(),
+			SeqNum:   TMCreateConnOKSeq,
+			Length:   0,
+		}
+		cm.writeToTunnelC <- resp
 	}
-	cm.writeToTunnelC <- resp
 
 }
 
@@ -234,13 +252,14 @@ func (cm *ConnManager) handleNewConn(newChannel chan io.ReadWriteCloser) {
 	for c := range newChannel {
 		// create and start a new ConnHandler with a new connection id, than append to cm.connHandlerPool
 		log.Debugf("CM: new connection, id: %d", cid)
-		rc := make(chan *GotaFrame)
+		rc := make(chan *GotaFrame, 1)
 
 		mu := &sync.Mutex{}
 		ch := &ConnHandler{
 			ClientID:        cm.clientID,
 			ConnID:          cid,
 			rw:              c,
+			cleanUpCHChan:   cm.cleanUpCHChan,
 			WriteToTunnelC:  cm.writeToTunnelC,
 			ReadFromTunnelC: rc,
 			mutex:           mu,
@@ -250,17 +269,23 @@ func (cm *ConnManager) handleNewConn(newChannel chan io.ReadWriteCloser) {
 		cm.poolLock.Unlock()
 		// TODO send to a work pool for performance reason
 		go func() {
-			log.Debug("CM: Try to create peer connection")
-			if !ch.CreatePeerConn() {
-				// destroy the unused connection handler
-				cm.poolLock.Lock()
-				ch.Stop()
-				delete(cm.connHandlerPool, NewCCID(cm.clientID, cid))
-				cm.poolLock.Unlock()
+			// TODO fast open feature
+			if cm.fastOpen {
+				log.Debug("CM: Try to create peer connection with fast open")
+				ch.CreateFastOpenConn()
+			} else {
+				log.Debug("CM: Try to create peer connection")
+				if !ch.CreatePeerConn() {
+					// destroy the unused connection handler
+					cm.poolLock.Lock()
+					ch.Stop()
+					delete(cm.connHandlerPool, NewCCID(cm.clientID, cid))
+					cm.poolLock.Unlock()
 
-				return
+					return
+				}
+				log.Debug("CM: Created peer connection")
 			}
-			log.Debug("CM: Created peer connection")
 			go ch.Start()
 		}()
 
@@ -273,19 +298,18 @@ func (cm *ConnManager) handleNewConn(newChannel chan io.ReadWriteCloser) {
 }
 
 func (cm *ConnManager) cleanUpCHPool() {
-	for {
-		select {
-		case <-cm.quit:
-			return
-		case <-time.After(time.Second * 60):
-			cm.poolLock.Lock()
-			for k, v := range cm.connHandlerPool {
-				if v.Stopped() {
-					delete(cm.connHandlerPool, k)
-				}
+	for ccid := range cm.cleanUpCHChan {
+		cm.poolLock.Lock()
+		ch, ok := cm.connHandlerPool[ccid]
+		if ok {
+			log.Debugf("CM: Clean up connection handler for connection: %d", ch.ConnID)
+			close(ch.ReadFromTunnelC)
+			delete(cm.connHandlerPool, ccid)
+			for _, v := range cm.connHandlerPool{
+				log.Warnf("%d", v.ConnID)
 			}
-			cm.poolLock.Unlock()
 		}
+		cm.poolLock.Unlock()
 	}
 }
 
@@ -303,6 +327,7 @@ func (cm *ConnManager) Stop() {
 	close(cm.writeToTunnelC)
 	close(cm.newCCIDChannel)
 	cm.stopAllConnHandler()
+	close(cm.cleanUpCHChan)
 }
 
 func (cm *ConnManager) stopAllConnHandler() {
@@ -315,20 +340,41 @@ func (cm *ConnManager) stopAllConnHandler() {
 }
 
 func (cm *ConnManager) dispatch() {
+	defer func(){
+		if r := recover(); r != nil {
+			// TODO error handling
+			log.Errorf("CM: Recover from error: %s", r)
+			go cm.dispatch()
+		}
+	}()
+
 	for gf := range cm.readFromTunnelC {
 		log.Debugf("CM: Received frame from tunnel: %s", gf)
 		cm.poolLock.RLock()
-		if ch, ok := cm.connHandlerPool[NewCCID(gf.clientID, gf.ConnID)]; ok {
+		ch, ok := cm.connHandlerPool[NewCCID(gf.clientID, gf.ConnID)]
+		cm.poolLock.RUnlock()
+		if ok {
 			// TODO avoid hang here
+			log.Debugf("CM: Found CH in pool, ClientID: %d, ConnID: %d", ch.ClientID, ch.ConnID)
+			// TODO "send on closed channel" panic due to cm.cleanUpCHPool()
 			ch.ReadFromTunnelC <- gf
+			continue
+		}
+
+		// TODO fast open feature
+		if cm.fastOpen && ! gf.IsControl() && gf.SeqNum == 0 {
+			go func(gf *GotaFrame){
+				// TODO connection is creating, delay this frame
+				cm.readFromTunnelC <- gf
+			}(gf)
 		} else {
+			// TODO connection pool feature
 			log.Errorf("CM: Connection didn't exist, client id: %d, connection id: %d, dropped.", gf.clientID, gf.ConnID)
 		}
 		//if gf.IsControl() && (gf.SeqNum == TMCloseConnSeq || gf.SeqNum == TMCloseConnForceSeq) {
 		//	log.Debugf("CM: Received close connection signal for connection %d, delete it from connection pool", gf.ConnID)
 		//	delete(cm.connHandlerPool, NewCCID(gf.clientID, gf.ConnID))
 		//}
-		cm.poolLock.RUnlock()
 	}
 }
 
@@ -341,6 +387,8 @@ type ConnHandler struct {
 
 	ClientID uint32
 	ConnID   uint32
+
+	cleanUpCHChan  chan<- CCID
 
 	WriteToTunnelC  chan *GotaFrame
 	ReadFromTunnelC chan *GotaFrame
@@ -375,13 +423,13 @@ func (ch *ConnHandler) Stop() {
 	ch.writeStopped = true
 }
 
-// Stopped return the connection hanlder's current status
+// Stopped return the connection handler's current status
 func (ch *ConnHandler) Stopped() bool {
 	return ch.readStopped || ch.writeStopped
 }
 
 // CreatePeerConn send request to create a peer connection.
-// It will wait for the first response, if the reponse goto frame is not a control for "TMCreateConnOKSeq",
+// It will wait for the first response, if the response gota frame is not a control for "TMCreateConnOKSeq",
 // it will return false.
 func (ch *ConnHandler) CreatePeerConn() bool {
 	// send create request
@@ -407,6 +455,20 @@ func (ch *ConnHandler) CreatePeerConn() bool {
 	return false
 }
 
+// CreateFastOpenConn send request to create a peer connection, but does not wait the response.
+func (ch *ConnHandler) CreateFastOpenConn() {
+	// send create request
+	req := &GotaFrame{
+		Control:  true,
+		clientID: ch.ClientID,
+		SeqNum:   TMCreateConnSeq,
+		ConnID:   ch.ConnID,
+		Length:   0,
+	}
+	ch.WriteToTunnelC <- req
+	log.Debug("CH: Create peer connection with fast open request send")
+}
+
 func (ch *ConnHandler) readFromTunnel() {
 	drop := func(c chan *GotaFrame) {
 		for gf := range c {
@@ -414,6 +476,9 @@ func (ch *ConnHandler) readFromTunnel() {
 		}
 	}
 	defer func() {
+		ch.mutex.Lock()
+		defer ch.mutex.Unlock()
+
 		go drop(ch.ReadFromTunnelC)
 
 		if cw, ok := ch.rw.(RWCloseWriter); ok {
@@ -422,6 +487,9 @@ func (ch *ConnHandler) readFromTunnel() {
 			ch.rw.Close()
 		}
 		ch.readStopped = true
+		if ch.writeStopped {
+			ch.cleanUpCHChan <- NewCCID(ch.ClientID, ch.ConnID)
+		}
 	}()
 
 	defer Recover()
@@ -430,16 +498,17 @@ func (ch *ConnHandler) readFromTunnel() {
 	seq = 0
 	cache := make(map[uint32][]byte)
 
-	log.Debugf("CH: Start to read from tunnel, client id: %d", ch.ClientID)
+	log.Debugf("CH: Start to read from tunnel, ClientID: %d, ConnID: %d", ch.ClientID, ch.ConnID)
 
 	for gf := range ch.ReadFromTunnelC {
+		log.Debugf("CH: Received frame from CM: %s", gf)
 		if gf.IsControl() {
 			// TODO control signal handle
 			if gf.SeqNum == TMCloseConnSeq {
-				log.Debugf("CH: Received close connection signal for connection %d", gf.ConnID)
+				log.Debugf("CH: Received close connection signal for ConnID: %d", gf.ConnID)
 				return
 			} else if gf.SeqNum == TMCloseConnForceSeq {
-				log.Warnf("CH: Received force close connection signal for connection %d", gf.ConnID)
+				log.Warnf("CH: Received force close connection signal for ConnID: %d", gf.ConnID)
 				ch.rw.Close()
 				return
 			}
@@ -492,12 +561,18 @@ func (ch *ConnHandler) readFromTunnel() {
 
 func (ch *ConnHandler) writeToTunnel() {
 	defer func() {
+		ch.mutex.Lock()
+		defer ch.mutex.Unlock()
+
 		if cw, ok := ch.rw.(RWCloseReader); ok {
 			cw.CloseRead()
 		} else {
 			ch.rw.Close()
 		}
 		ch.writeStopped = true
+		if ch.readStopped {
+			ch.cleanUpCHChan <- NewCCID(ch.ClientID, ch.ConnID)
+		}
 	}()
 
 	defer Recover()
@@ -505,7 +580,7 @@ func (ch *ConnHandler) writeToTunnel() {
 	var seq uint32
 	seq = 0
 
-	log.Debugf("CH: Start to write to tunnel, client id: %d", ch.ClientID)
+	log.Debugf("CH: Start to write to tunnel, ClientID: %d, ConnID: %d", ch.ClientID, ch.ConnID)
 	for {
 		// TODO when to call cache.Put() ?
 		//data := cache.Get().([]byte)
@@ -528,7 +603,7 @@ func (ch *ConnHandler) writeToTunnel() {
 		}
 
 		if err == io.EOF {
-			log.Debugf("CH: Received io.EOF, start to close write connection on server")
+			log.Debugf("CH: Received io.EOF, start to close write connection on peer")
 			ch.sendCloseGotaFrame()
 			return
 		} else if err != nil {

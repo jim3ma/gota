@@ -85,6 +85,11 @@ to quickly create a Cobra application.`,
 					UserName: userName,
 					Password: password,
 				})
+
+			if viper.GetBool("fastopen") {
+				client.ConnManager.EnableFastOpen()
+			}
+
 			client.ListenAndServe(viper.GetString("listen"))
 		} else {
 			log.Error("Gota: Cann't parse tunnel config")

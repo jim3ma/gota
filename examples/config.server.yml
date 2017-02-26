@@ -13,6 +13,8 @@ auth:
 # suppose you want to speed up you 8080 port
 remote: 127.0.0.1:8080
 
+fastopen: true
+
 # tunnel listen address with port
 tunnel:
   - listen: 127.0.0.1:12333

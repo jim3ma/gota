@@ -155,12 +155,13 @@ const (
 	TMCloseTunnelOKSeq
 
 	TMTunnelAuthOKSeq
-	TMTunnelAuthErrSeq
+	TMTunnelAuthErrorSeq
 
 	// when a signal big than the boundary, it will contain a payload
 	TMWithoutPayloadBoundary
 
 	TMTunnelAuthSeq
+	TMCreateFastOpenConnSeq
 )
 
 const (
@@ -216,6 +217,10 @@ func ReadGotaFrame(r io.Reader) (*GotaFrame, error) {
 
 	// if gf.Control && gf.Length == 0 is a better sulution ?
 	if gf.Control && gf.SeqNum < TMWithoutPayloadBoundary {
+		return &gf, nil
+	}
+
+	if gf.Length == 0 {
 		return &gf, nil
 	}
 
@@ -292,7 +297,7 @@ func init() {
 		Control: true,
 		ConnID:  uint32(0),
 		Length:  0,
-		SeqNum:  uint32(TMTunnelAuthErrSeq),
+		SeqNum:  uint32(TMTunnelAuthErrorSeq),
 	}
 	TMTunnelAuthErrBytes = WrapGotaFrame(TMTunnelAuthErrGotaFrame)
 
@@ -309,5 +314,6 @@ func init() {
 	TMControlSignalMap[TMCloseTunnelOKSeq] = "CloseTunnelOK"
 	TMControlSignalMap[TMTunnelAuthSeq] = "TunnelAuth"
 	TMControlSignalMap[TMTunnelAuthOKSeq] = "TunnelAuthOK"
-	TMControlSignalMap[TMTunnelAuthErrSeq] = "TunnelAuthErr"
+	TMControlSignalMap[TMTunnelAuthErrorSeq] = "TunnelAuthErr"
+	TMControlSignalMap[TMCreateFastOpenConnSeq] = "CreateFastOpenConn"
 }

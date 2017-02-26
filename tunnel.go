@@ -507,6 +507,9 @@ func (t *TunnelTransport) readFromPeerTunnel() {
 			case TMCreateConnSeq:
 				log.Debug("TT: Received Create Connection Signal")
 				t.newCCIDChannel <- NewCCID(gf.clientID, gf.ConnID)
+			case TMCreateFastOpenConnSeq:
+				log.Debug("TT: Received Create Fast Open Connection Signal")
+				t.newCCIDChannel <- NewCCID(gf.clientID, gf.ConnID)
 			case TMCreateConnOKSeq:
 				// TODO optimize
 				log.Debug("TT: Received Create Connection OK Signal")

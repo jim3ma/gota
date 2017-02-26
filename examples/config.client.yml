@@ -12,6 +12,8 @@ auth:
 # local listen address with port
 listen: 127.0.0.1:12363
 
+fastopen: true
+
 # Gota server addresses with port
 tunnel:
   - remote: 127.0.0.1:12333 # connect server directly
