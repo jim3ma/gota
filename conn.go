@@ -645,6 +645,91 @@ func (ch *ConnHandler) sendForceCloseGotaFrame() {
 	ch.WriteToTunnelC <- gf
 }
 
+type ConnPool struct {
+	count        int
+	connChannel  chan uint32
+	quit         chan struct{}
+	fastOpen     bool
+
+	WriteToTunnelChan  chan *GotaFrame
+	ReadFromTunnelChan chan *GotaFrame
+}
+
+func NewConnPool(n int, fastOpen bool, rc, wc chan *GotaFrame) *ConnPool {
+	c := make(chan uint32, n - 1)
+	quit := make(chan struct{})
+	return &ConnPool{
+		count:       n,
+		connChannel: c,
+		quit:        quit,
+		fastOpen:    fastOpen,
+
+		WriteToTunnelChan:  wc,
+		ReadFromTunnelChan: rc,
+	}
+}
+
+func (c *ConnPool) Start() {
+}
+
+func (c *ConnPool) createConn(){
+	for {
+		// create a peer connection
+		connID := uint32(666)
+
+		// send create request
+		req := &GotaFrame{
+			Control:  true,
+			SeqNum:   TMCreateConnSeq,
+			ConnID:   connID,
+			Length:   0,
+		}
+		c.WriteToTunnelChan <- req
+
+		select {
+		case c.connChannel <- connID:
+		case <-c.quit:
+			return
+		}
+	}
+}
+
+func (c *ConnPool) createConnWithFastOpen(){
+	for {
+		// create a peer connection
+		connID := uint32(666)
+
+		// send create request
+		req := &GotaFrame{
+			Control:  true,
+			SeqNum:   TMCreateConnSeq,
+			ConnID:   connID,
+			Length:   0,
+		}
+		c.WriteToTunnelChan <- req
+
+		select {
+		case c.connChannel <- connID:
+		case <-c.quit:
+			return
+		}
+	}
+}
+
+func (c *ConnPool) ReadFromTunnel(){
+	for gf := range c.ReadFromTunnelChan{
+		if gf.Control && gf.SeqNum == TMCreateConnOKSeq {
+			c.connChannel <- gf.ConnID
+		} else {
+			log.Warnf("CP: Received unexcepte gota frame: %s", gf)
+		}
+	}
+}
+
+func (c *ConnPool) GetConnID() uint32 {
+	return <- c.connChannel
+}
+
 var cache sync.Pool
 
 const MaxRetryTimes = 3
