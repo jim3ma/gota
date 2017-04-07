@@ -41,7 +41,7 @@ to quickly create a Cobra application.`,
 		if viper.Get("mode") == "server" {
 			log.Info("Gota: Work in server mode")
 		} else {
-			log.Info("Gota: Error mode in config")
+			log.Error("Gota: Error mode in config")
 		}
 
 		logLevel := viper.GetString("log")
