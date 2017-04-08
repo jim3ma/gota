@@ -231,9 +231,8 @@ func (cm *ConnManager) dialAndCreateCH(cc CCID, addr *net.TCPAddr) {
 	cm.connHandlerPool[cc] = ch
 	cm.poolLock.Unlock()
 
-
 	// TODO enable fast open
-	if ! cm.fastOpen {
+	if !cm.fastOpen {
 		// send response after created the connection
 		resp := &GotaFrame{
 			Control:  true,
@@ -305,7 +304,7 @@ func (cm *ConnManager) cleanUpCHPool() {
 			log.Debugf("CM: Clean up connection handler for connection: %d", ch.ConnID)
 			close(ch.ReadFromTunnelC)
 			delete(cm.connHandlerPool, ccid)
-			for _, v := range cm.connHandlerPool{
+			for _, v := range cm.connHandlerPool {
 				log.Warnf("%d", v.ConnID)
 			}
 		}
@@ -340,7 +339,7 @@ func (cm *ConnManager) stopAllConnHandler() {
 }
 
 func (cm *ConnManager) dispatch() {
-	defer func(){
+	defer func() {
 		if r := recover(); r != nil {
 			// TODO error handling
 			log.Errorf("CM: Recover from error: %s", r)
@@ -362,8 +361,8 @@ func (cm *ConnManager) dispatch() {
 		}
 
 		// TODO fast open feature
-		if cm.fastOpen && ! gf.IsControl() && gf.SeqNum == 0 {
-			go func(gf *GotaFrame){
+		if cm.fastOpen && !gf.IsControl() && gf.SeqNum == 0 {
+			go func(gf *GotaFrame) {
 				// TODO connection is creating, delay this frame
 				cm.readFromTunnelC <- gf
 			}(gf)
@@ -388,7 +387,7 @@ type ConnHandler struct {
 	ClientID uint32
 	ConnID   uint32
 
-	cleanUpCHChan  chan<- CCID
+	cleanUpCHChan chan<- CCID
 
 	WriteToTunnelC  chan *GotaFrame
 	ReadFromTunnelC chan *GotaFrame
@@ -646,17 +645,17 @@ func (ch *ConnHandler) sendForceCloseGotaFrame() {
 }
 
 type ConnPool struct {
-	count        int
-	connChannel  chan uint32
-	quit         chan struct{}
-	fastOpen     bool
+	count       int
+	connChannel chan uint32
+	quit        chan struct{}
+	fastOpen    bool
 
 	WriteToTunnelChan  chan *GotaFrame
 	ReadFromTunnelChan chan *GotaFrame
 }
 
 func NewConnPool(n int, fastOpen bool, rc, wc chan *GotaFrame) *ConnPool {
-	c := make(chan uint32, n - 1)
+	c := make(chan uint32, n-1)
 	quit := make(chan struct{})
 	return &ConnPool{
 		count:       n,
@@ -672,17 +671,17 @@ func NewConnPool(n int, fastOpen bool, rc, wc chan *GotaFrame) *ConnPool {
 func (c *ConnPool) Start() {
 }
 
-func (c *ConnPool) createConn(){
+func (c *ConnPool) createConn() {
 	for {
 		// create a peer connection
 		connID := uint32(666)
 
 		// send create request
 		req := &GotaFrame{
-			Control:  true,
-			SeqNum:   TMCreateConnSeq,
-			ConnID:   connID,
-			Length:   0,
+			Control: true,
+			SeqNum:  TMCreateConnSeq,
+			ConnID:  connID,
+			Length:  0,
 		}
 		c.WriteToTunnelChan <- req
 
@@ -694,17 +693,17 @@ func (c *ConnPool) createConn(){
 	}
 }
 
-func (c *ConnPool) createConnWithFastOpen(){
+func (c *ConnPool) createConnWithFastOpen() {
 	for {
 		// create a peer connection
 		connID := uint32(666)
 
 		// send create request
 		req := &GotaFrame{
-			Control:  true,
-			SeqNum:   TMCreateConnSeq,
-			ConnID:   connID,
-			Length:   0,
+			Control: true,
+			SeqNum:  TMCreateConnSeq,
+			ConnID:  connID,
+			Length:  0,
 		}
 		c.WriteToTunnelChan <- req
 
@@ -716,8 +715,8 @@ func (c *ConnPool) createConnWithFastOpen(){
 	}
 }
 
-func (c *ConnPool) ReadFromTunnel(){
-	for gf := range c.ReadFromTunnelChan{
+func (c *ConnPool) ReadFromTunnel() {
+	for gf := range c.ReadFromTunnelChan {
 		if gf.Control && gf.SeqNum == TMCreateConnOKSeq {
 			c.connChannel <- gf.ConnID
 		} else {
@@ -727,7 +726,7 @@ func (c *ConnPool) ReadFromTunnel(){
 }
 
 func (c *ConnPool) GetConnID() uint32 {
-	return <- c.connChannel
+	return <-c.connChannel
 }
 
 var cache sync.Pool
