@@ -1,5 +1,7 @@
 # [WIP] Gota - a TCP Traffic Aggregator Written in Golang
 
+[![Linux Build Status](https://img.shields.io/travis/jim3ma/gota.svg?style=flat-square&label=linux+build)](https://travis-ci.org/jim3ma/gota) [![Go Report Card](https://goreportcard.com/badge/github.com/jim3ma/gota?style=flat-square)](https://goreportcard.com/report/jim3ma/gota) [![Apache License Version 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0.html)
+
 Gota is a userspace multipath tcp solution.
 
 Gota Active End(aka client) receives tcp traffic and forwards to Gota Passive End(aka server) use multipath tcp connections.
