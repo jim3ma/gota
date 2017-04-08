@@ -400,7 +400,7 @@ func NewConnHandler(rw io.ReadWriteCloser) *ConnHandler {
 	}
 }
 
-// Start forward traffic between local request and remote reponse
+// Start forward traffic between local request and remote response
 func (ch *ConnHandler) Start() {
 	ch.mutex = &sync.Mutex{}
 	go ch.readFromTunnel()

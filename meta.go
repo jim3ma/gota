@@ -189,7 +189,7 @@ var TMControlSignalMap map[uint32]string
 const HeaderLength = 10
 
 var HeaderOnly = errors.New("Gota Header Only")
-var ErrInsufficientData = errors.New("Error Header, Insufficent Data for GotaFrame Header")
+var ErrInsufficientData = errors.New("Error Header, Insufficient Data for GotaFrame Header")
 var ErrUnmatchedDataLength = errors.New("Unmatched Data Length for GotaFrame")
 
 func WrapGotaFrame(gf *GotaFrame) []byte {

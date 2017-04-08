@@ -1,5 +1,9 @@
 package gota
 
+var (
+	version = "r1"
+)
+
 // Gota provides quick usage for gota
 type Gota struct {
 	ConnManager   *ConnManager

@@ -1,0 +1,42 @@
+language: go
+
+go:
+  - 1.8
+  - tip
+
+matrix:
+  allow_failures:
+    - go: tip
+  fast_finish: true
+
+install:
+  - go get github.com/golang/dep/...
+  - dep ensure
+  - go get github.com/golang/lint/golint
+  - go get github.com/gordonklaus/ineffassign
+  - go get github.com/client9/misspell/cmd/misspell
+
+script:
+  - go vet $(go list ./... | grep -v /vendor/)
+  # - go test -race $(go list ./... | grep -v /vendor/)
+  # workaround for vendor folder
+  - rm -rf vendor/*
+  - diff <(echo -n) <(gofmt -s -d .)
+  - ineffassign .
+  - misspell -error .
+
+after_script:
+  - golint $(go list ./... | grep -v /vendor/)
+
+before_deploy: ./hack/release.sh
+
+deploy:
+  provider: releases
+  api_key:
+    secure: BIxkDuKrrIF47xltcSxgBR8QKNwupEQX9xDY3pGnS7VXVaNtiz5vULx0GjG6bGI5AkmmPD2n0yRTiLJ71aW515BUDEKu3Xq3fFLMNj6gfbos24N4zjSPVRTvDRJQiSpt8Ci35mloI+8aGDeWK9Yd4QF/UCBoEPGLozBBKbW+GucLVjUaor8LUa87RmoMi+nUxFprJHQUSES53E+84wi0Dfqf3ryZsMzdiMHeYmuJ8AmWJ8+wDuIyE6NGdPlVEYpthZNy4LfYEc6DKoNzttp3zT08XMifDnHwsvp6H0/kP7YkiseyCC3BiDgSm26FwA2QW2RvyBMIm/Z7ujzxaty8hTMtbLkAP+yKRiHc3850GzngWMGEX45p3iyGz+E4GeX1Pqw8Iupx5oPAHAi66twBE18IAjEH7gICmcOk06jeB+25/GoimOG/k2NkXPn7N6Rg+F1kY1hbV4GSm/pJ/GuJR3YWMxEkb2JFdqbOVGflgTuhf+Mr4V5zRTrnqcJilwDJkcgLNFZfERRj0hJU7KCEe2iYlzQYdl7HKs6sa+uI1alD3P9C0yD01XQ4mVjIGORl1P8yBVv9daj4ueg4B2OL64rcCi4/vBC+5CHdQQwzcyPtvtIqNMLVFokCPWwPtlBB1a5a5tNS87p0CcLi6vCc2H6Atk60MS6ajPSTbyuAACQ=
+  file_glob: true
+  file: bin/*
+  skip_cleanup: true
+  on:
+    repo: jim3ma/gota
+    tags: true

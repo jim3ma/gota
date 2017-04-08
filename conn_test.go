@@ -70,6 +70,7 @@ func (b *buffer) Write(p []byte) (n int, err error) {
 		} else {
 			n = 0
 			err = errors.New("Mismatch!")
+			return
 		}
 	}
 	n = 0
@@ -154,7 +155,7 @@ func TestConnHandler_Start(t *testing.T) {
 	time.Sleep(time.Second * 1)
 
 	if !ch.Stopped() {
-		t.Error("conn hanlder did not stop")
+		t.Error("conn handler did not stop")
 		ch.Stop()
 	}
 	if buf.wclosed != true {
@@ -257,7 +258,7 @@ func TestConnManager_handleNewConn(t *testing.T) {
 	time.Sleep(time.Second * 1)
 	for _, ch := range cm.connHandlerPool {
 		if !ch.Stopped() {
-			t.Error("conn hanlder did not stop normally")
+			t.Error("conn handler did not stop normally")
 			ch.Stop()
 		}
 	}

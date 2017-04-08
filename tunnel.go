@@ -222,7 +222,7 @@ func (tm *TunnelManager) listenAndServe(config TunnelPassiveConfig) {
 
 		request, err := ReadGotaFrame(conn)
 		if err != nil {
-			log.Error("TM: Received gota frame header error: %s, stop auth", err)
+			log.Errorf("TM: Received gota frame header error: %s, stop auth", err)
 			conn.Close()
 			continue
 		}
