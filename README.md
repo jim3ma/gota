@@ -16,7 +16,7 @@ We can use Gota as a library, or daemon.
 
 ### Use Gota as Daemon
 
-#### Get Gota binary
+#### Fetch Gota binary
 
 * Build from source
 
@@ -26,11 +26,11 @@ go get github.com/jim3ma/gota/gota
 
 Or
 
-* [TBD] Download from [Release](https://github.com/jim3ma/gota/releases) page according to you os and arch
+* Download from [Release](https://github.com/jim3ma/gota/releases) page according to you os and architecture.
 
 #### Update Server Configuration
 
-> PS: the config files already exist in `examples`, you can make a reference.
+> PS: the config files already exist in `examples` folder, you can make a reference.
 
 * Update and save as config.server.yml
 
