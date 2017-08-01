@@ -1,7 +1,7 @@
 package gota
 
 var (
-	version = "r1"
+	version = "v0.0.1-beta"
 )
 
 // Gota provides quick usage for gota
