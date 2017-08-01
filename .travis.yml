@@ -28,7 +28,9 @@ script:
 after_script:
   - golint $(go list ./... | grep -v /vendor/)
 
-before_deploy: ./hack/release.sh
+before_deploy:
+  - dep ensure
+  - ./hack/release.sh
 
 deploy:
   provider: releases
