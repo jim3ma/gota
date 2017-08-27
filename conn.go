@@ -26,7 +26,7 @@ func NewCCID(clientID ClientID, connID uint32) (cc CCID) {
 
 // ClientID return client id
 func (cc CCID) ClientID() ClientID {
-	return ClientID(uint32(cc >> 32))
+	return uint32(cc >> 32)
 }
 
 // ConnID return connection id
@@ -71,7 +71,7 @@ func NewConnManager() *ConnManager {
 
 	d := make([]byte, 4)
 	rand.Read(d)
-	clientID := ClientID(binary.LittleEndian.Uint32(d))
+	clientID := binary.LittleEndian.Uint32(d)
 
 	return &ConnManager{
 		clientID: clientID,

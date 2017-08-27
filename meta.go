@@ -246,7 +246,7 @@ func EmbedClientIDHeaderToPayload(gf *GotaFrame) {
 }
 
 func ParseClientIDHeaderFromPayload(gf *GotaFrame) {
-	client := ClientID(binary.LittleEndian.Uint32(gf.Payload[:4]))
+	client := binary.LittleEndian.Uint32(gf.Payload[:4])
 
 	gf.Payload = gf.Payload[4:]
 	gf.Length -= 4
