@@ -267,7 +267,7 @@ func (tm *TunnelManager) listenAndServe(config TunnelPassiveConfig) {
 		tm.poolLock.Unlock()
 
 		tm.poolLock.RLock()
-		t := NewTunnelTransport(tm.writePool[client], tm.readPool[client], conn, client)
+		t := NewTunnelTransport(tm.writePool[client], tm.readPool[client], conn, PassiveMode, client)
 		tm.poolLock.RUnlock()
 
 		t.SetCCIDChannel(tm.newCCIDChannel)
@@ -367,7 +367,7 @@ func (tm *TunnelManager) connectAndServe(config TunnelActiveConfig, client Clien
 	tm.poolLock.Unlock()
 
 	tm.poolLock.RLock()
-	t := NewTunnelTransport(tm.writePool[client], tm.readPool[client], conn, client)
+	t := NewTunnelTransport(tm.writePool[client], tm.readPool[client], conn, ActiveMode, client)
 	tm.poolLock.RUnlock()
 
 	tm.ttPool = append(tm.ttPool, t)
@@ -427,6 +427,7 @@ type TunnelTransport struct {
 	clientID ClientID
 
 	quit chan struct{}
+	mode int
 
 	mutex        sync.Locker
 	writeStopped bool
@@ -445,7 +446,7 @@ type TunnelTransport struct {
 	rw io.ReadWriteCloser
 }
 
-func NewTunnelTransport(wp, rp chan<- chan *GotaFrame, rw io.ReadWriteCloser, clientID ...ClientID) *TunnelTransport {
+func NewTunnelTransport(wp, rp chan<- chan *GotaFrame, rw io.ReadWriteCloser, mode int, clientID ...ClientID) *TunnelTransport {
 	var c ClientID
 	if clientID != nil {
 		c = clientID[0]
@@ -462,6 +463,7 @@ func NewTunnelTransport(wp, rp chan<- chan *GotaFrame, rw io.ReadWriteCloser, cl
 		mutex: &sync.Mutex{},
 
 		clientID: c,
+		mode:     mode,
 
 		newCCIDChannel: nil,
 
@@ -497,7 +499,14 @@ func (t *TunnelTransport) readFromPeerTunnel() {
 	for {
 		gf, err := ReadGotaFrame(t.rw)
 		if err != nil {
-			log.Errorf("TT: Received gota frame error, stop this worker, error: %s", err)
+			log.Errorf("TT: Error: %s", err)
+			select {
+			case <-t.quit:
+				return
+			default:
+				log.Errorf("TT: Received gota frame error, stop this worker, error: %s", err)
+				t.Stop()
+			}
 			return
 		}
 		gf.clientID = t.clientID
@@ -509,7 +518,7 @@ func (t *TunnelTransport) readFromPeerTunnel() {
 			case TMHeartBeatPingSeq:
 				go t.sendHeartBeatResponse()
 			case TMHeartBeatPongSeq:
-				log.Info("TT: Received Hearbeat Pong")
+				log.Info("TT: Received Heartbeat Pong")
 
 			case TMCreateConnSeq:
 				log.Debug("TT: Received Create Connection Signal")
@@ -602,14 +611,14 @@ Loop:
 				log.Errorf("TT: Send heartbeat failed, stop this worker, error: \"%s\"", err)
 				break Loop
 			}
-			log.Info("TT: Sent Hearbeat Ping")
+			log.Info("TT: Sent Heartbeat Ping")
 		case <-tick.C:
 			err := t.sendHeartBeatRequest()
 			if err != nil {
 				log.Errorf("TT: Send heartbeat failed, stop this worker, error: \"%s\"", err)
 				break Loop
 			}
-			log.Info("TT: Sent Hearbeat Ping")
+			log.Info("TT: Sent Heartbeat Ping")
 		case <-t.quit:
 			// TODO if the read channel already registered to the read pool
 
@@ -632,15 +641,16 @@ func (t *TunnelTransport) sendHeartBeatRequest() error {
 
 func (t *TunnelTransport) sendHeartBeatResponse() {
 	t.readChannel <- TMHeartBeatPongGotaFrame
-	log.Info("TT: Sent Hearbeat Pong")
+	log.Info("TT: Sent Heartbeat Pong")
 }
 
 func (t *TunnelTransport) sendCloseTunnelRequest() error {
+	log.Info("TT: Sent Close Tunnel request")
 	err := WriteNBytes(t.rw, HeaderLength, TMCloseTunnelBytes)
 	if err != nil {
-		return err
+		log.Errorf("TT: Sent Close Tunnel request error: %s", err)
 	}
-	return nil
+	return err
 }
 
 func (t *TunnelTransport) sendCloseTunnelResponse() {
@@ -651,6 +661,7 @@ func (t *TunnelTransport) sendCloseTunnelResponse() {
 	log.Info("TT: Sent Close Tunnel response")
 	t.readStopped = true
 	close(t.quit)
+	t.Stop()
 }
 
 // Start method starts the run loop for the worker, listening for a quit channel in
@@ -665,23 +676,29 @@ func (t *TunnelTransport) Stop() {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 
+	defer func() {
+		if t.mode == ActiveMode {
+			ShutdownGota()
+		}
+	}()
+
 	if t.readStopped && t.writeStopped {
 		return
 	}
+
 	// close a channel will trigger all reading from the channel to return immediately
 	close(t.quit)
 	timeout := 0
 	for {
+		if t.readStopped && t.writeStopped {
+			return
+		}
 		if timeout < TMHeartBeatSecond {
 			time.Sleep(time.Second)
 			timeout++
 		} else {
-			if t.readStopped && t.writeStopped {
-				return
-			} else {
-				t.rw.Close()
-				return
-			}
+			t.rw.Close()
+			return
 		}
 	}
 }

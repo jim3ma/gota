@@ -469,6 +469,8 @@ func (ch *ConnHandler) CreateFastOpenConn() {
 }
 
 func (ch *ConnHandler) readFromTunnel() {
+	defer Recover()
+
 	drop := func(c chan *GotaFrame) {
 		for gf := range c {
 			log.Warnf("CH: Connection %d closed, Gota Frame dropped", gf.ConnID)
@@ -491,8 +493,6 @@ func (ch *ConnHandler) readFromTunnel() {
 			ch.cleanUpCHChan <- NewCCID(ch.ClientID, ch.ConnID)
 		}
 	}()
-
-	defer Recover()
 
 	var seq uint32
 	seq = 0
@@ -560,6 +560,8 @@ func (ch *ConnHandler) readFromTunnel() {
 }
 
 func (ch *ConnHandler) writeToTunnel() {
+	defer Recover()
+
 	defer func() {
 		ch.mutex.Lock()
 		defer ch.mutex.Unlock()
@@ -575,7 +577,6 @@ func (ch *ConnHandler) writeToTunnel() {
 		}
 	}()
 
-	defer Recover()
 	// read io.EOF and send CloseWrite signal
 	var seq uint32
 	seq = 0

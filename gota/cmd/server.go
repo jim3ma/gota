@@ -26,6 +26,7 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 )
 
@@ -84,22 +85,26 @@ var serverCmd = &cobra.Command{
 			}
 
 			sigs := make(chan os.Signal, 1)
-			signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+			signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 
+			wg := sync.WaitGroup{}
 			go func() {
 				sig := <-sigs
 				log.Infof("Received signal: %s, exit gota server", sig)
-				cmClosed := make(chan struct{})
+				wg.Add(2)
 				go func() {
 					client.ConnManager.Stop()
-					close(cmClosed)
+					wg.Done()
 				}()
-				client.TunnelManager.Stop()
-				<-cmClosed
-				os.Exit(0)
+				go func() {
+					client.TunnelManager.Stop()
+					wg.Done()
+				}()
 			}()
 
 			client.Serve(viper.GetString("remote"))
+			wg.Wait()
+
 		} else {
 			log.Error("Gota: Can not parse tunnel config")
 		}

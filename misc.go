@@ -6,6 +6,7 @@ import (
 	"errors"
 	log "github.com/Sirupsen/logrus"
 	"io"
+	"os"
 	"strings"
 	"time"
 )
@@ -141,4 +142,9 @@ func SetLogLevel(l string) {
 	default:
 		log.SetLevel(log.DebugLevel)
 	}
+}
+
+func ShutdownGota() {
+	process, _ := os.FindProcess(os.Getpid())
+	process.Signal(os.Interrupt)
 }
