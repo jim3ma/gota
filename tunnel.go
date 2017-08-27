@@ -28,10 +28,12 @@ type TunnelPassiveConfig struct {
 	*net.TCPAddr
 }
 
+type ClientID = uint32
+
 type TunnelManager struct {
 	auth *TunnelAuthCredential
 	// only uesd for active mode
-	clientID uint32
+	clientID ClientID
 	mode     int
 	config   interface{}
 
@@ -47,16 +49,16 @@ type TunnelManager struct {
 	readFromConnC chan *GotaFrame
 
 	poolLock  sync.RWMutex
-	readPool  map[uint32]chan chan *GotaFrame
-	writePool map[uint32]chan chan *GotaFrame
+	readPool  map[ClientID]chan chan *GotaFrame
+	writePool map[ClientID]chan chan *GotaFrame
 }
 
 // NewTunnelManager returns a new TunnelManager
 // rc is used for reading from connection manager
 // wc is used for writing to connection manager
 func NewTunnelManager(rc chan *GotaFrame, wc chan *GotaFrame, auth *TunnelAuthCredential) *TunnelManager {
-	rp := make(map[uint32]chan chan *GotaFrame)
-	wp := make(map[uint32]chan chan *GotaFrame)
+	rp := make(map[ClientID]chan chan *GotaFrame)
+	wp := make(map[ClientID]chan chan *GotaFrame)
 	quit := make(chan struct{})
 	mu := &sync.Mutex{}
 	pool := make([]*TunnelTransport, 0)
@@ -104,7 +106,7 @@ func (tm *TunnelManager) SetConfig(config interface{}) error {
 	case []TunnelPassiveConfig:
 		tm.mode = PassiveMode
 	default:
-		return TMErrUnsupportConfig
+		return TMErrUnsupportedConfig
 	}
 	tm.config = config
 	return nil
@@ -116,7 +118,7 @@ func (tm *TunnelManager) SetCCIDChannel(c chan CCID) {
 	tm.newCCIDChannel = c
 }
 
-func (tm *TunnelManager) SetClientID(c uint32) {
+func (tm *TunnelManager) SetClientID(c ClientID) {
 	tm.mutex.Lock()
 	defer tm.mutex.Unlock()
 	tm.clientID = c
@@ -182,7 +184,7 @@ func (tm *TunnelManager) listenAndServe(config TunnelPassiveConfig) {
 		// TODO graceful shutdown?
 		select {
 		case <-tm.quit:
-			log.Info("TM: Received quit signal")
+			log.Infof("TM: Received quit signal, listener info: %s", listener.Addr())
 			listener.Close()
 		case <-restart:
 		}
@@ -196,7 +198,7 @@ func (tm *TunnelManager) listenAndServe(config TunnelPassiveConfig) {
 			case <-tm.quit:
 				return
 			default:
-				// TODO if encount network error, restart
+				// TODO if encounter network error, restart
 				log.Errorf("TM: Accept Connection Error: %s", err)
 				log.Info("TM: Restart Tunnel with Configuration: %+v", config)
 				go tm.listenAndServe(config)
@@ -277,7 +279,7 @@ func (tm *TunnelManager) listenAndServe(config TunnelPassiveConfig) {
 	}
 }
 
-func (tm *TunnelManager) connectAndServe(config TunnelActiveConfig, client uint32) {
+func (tm *TunnelManager) connectAndServe(config TunnelActiveConfig, client ClientID) {
 	var conn net.Conn
 	var err error
 
@@ -308,7 +310,7 @@ func (tm *TunnelManager) connectAndServe(config TunnelActiveConfig, client uint3
 
 	// TODO retry
 	if err != nil {
-		log.Errorf("TM: Connect remote end error: %s", err)
+		log.Fatalf("TM: Connect remote end error: %s", err)
 		return
 	}
 
@@ -377,11 +379,15 @@ func (tm *TunnelManager) connectAndServe(config TunnelActiveConfig, client uint3
 
 func (tm *TunnelManager) readDispatch() {
 	for {
-		gf := <-tm.readFromConnC
+		gf, ok := <-tm.readFromConnC
+		if !ok {
+			break
+		}
 		log.Debugf("TM: Received frame from CM: %s", gf)
+		// multiple client support
 		client := gf.clientID
-		tm.poolLock.RLock()
 
+		tm.poolLock.RLock()
 		// bug fixed for hang in listenAndServe
 		pool, ok := tm.readPool[client]
 		if !ok {
@@ -389,15 +395,16 @@ func (tm *TunnelManager) readDispatch() {
 			continue
 		}
 		tm.poolLock.RUnlock()
+
 		<-pool <- gf
 	}
 }
 
-func (tm *TunnelManager) writeDispatchForClient(client uint32) {
+func (tm *TunnelManager) writeDispatchForClient(client ClientID) {
 	pool := tm.writePool[client]
 
 	if tm.clientID != 0 {
-		log.Infof("TM: Launch Write Dispatch for Client: %d, Write Pool: %d", client, &pool)
+		log.Infof("TM: Launch write dispatch for client: %d, Write Pool: %d", client, &pool)
 	}
 	for {
 		select {
@@ -417,7 +424,7 @@ func (tm *TunnelManager) stopAllTunnelTransport() {
 }
 
 type TunnelTransport struct {
-	clientID uint32
+	clientID ClientID
 
 	quit chan struct{}
 
@@ -438,8 +445,8 @@ type TunnelTransport struct {
 	rw io.ReadWriteCloser
 }
 
-func NewTunnelTransport(wp, rp chan<- chan *GotaFrame, rw io.ReadWriteCloser, clientID ...uint32) *TunnelTransport {
-	var c uint32
+func NewTunnelTransport(wp, rp chan<- chan *GotaFrame, rw io.ReadWriteCloser, clientID ...ClientID) *TunnelTransport {
+	var c ClientID
 	if clientID != nil {
 		c = clientID[0]
 	} else {
@@ -690,7 +697,7 @@ const (
 
 var modeMap map[string]int
 
-var TMErrUnsupportConfig = errors.New("Unsupport configuration")
+var TMErrUnsupportedConfig = errors.New("Unsupport configuration")
 
 func init() {
 	modeMap = make(map[string]int)

@@ -24,13 +24,16 @@ import (
 	"github.com/spf13/viper"
 	"net/http"
 	_ "net/http/pprof"
+	"os"
+	"os/signal"
+	"syscall"
 )
 
 // serverCmd represents the server command
 var serverCmd = &cobra.Command{
 	Use:   "server",
 	Short: "Gota server",
-	Long: `Gota server`,
+	Long:  `Gota server`,
 	Run: func(cmd *cobra.Command, args []string) {
 		// TODO: Work your own magic here
 		if viper.Get("mode") == "server" {
@@ -79,6 +82,22 @@ var serverCmd = &cobra.Command{
 			if viper.GetBool("fastopen") {
 				client.ConnManager.EnableFastOpen()
 			}
+
+			sigs := make(chan os.Signal, 1)
+			signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+
+			go func() {
+				sig := <-sigs
+				log.Infof("Received signal: %s, exit gota server", sig)
+				cmClosed := make(chan struct{})
+				go func() {
+					client.ConnManager.Stop()
+					close(cmClosed)
+				}()
+				client.TunnelManager.Stop()
+				<-cmClosed
+				os.Exit(0)
+			}()
 
 			client.Serve(viper.GetString("remote"))
 		} else {

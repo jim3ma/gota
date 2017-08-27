@@ -24,13 +24,16 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 	"net/url"
+	"os"
+	"os/signal"
+	"syscall"
 )
 
 // clientCmd represents the client command
 var clientCmd = &cobra.Command{
 	Use:   "client",
 	Short: "Gota client",
-	Long: `Gota client`,
+	Long:  `Gota client`,
 	Run: func(cmd *cobra.Command, args []string) {
 		// TODO: Work your own magic here
 		if viper.Get("mode") == "client" {
@@ -84,6 +87,22 @@ var clientCmd = &cobra.Command{
 			if viper.GetBool("fastopen") {
 				client.ConnManager.EnableFastOpen()
 			}
+
+			sigs := make(chan os.Signal, 1)
+			signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+
+			go func() {
+				sig := <-sigs
+				log.Infof("Received signal: %s, exit gota client", sig)
+				cmClosed := make(chan struct{})
+				go func() {
+					client.ConnManager.Stop()
+					close(cmClosed)
+				}()
+				client.TunnelManager.Stop()
+				<-cmClosed
+				os.Exit(0)
+			}()
 
 			client.ListenAndServe(viper.GetString("listen"))
 		} else {

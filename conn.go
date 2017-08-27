@@ -18,15 +18,15 @@ import (
 type CCID uint64
 
 // NewCCID return a new CCID with client id and conn id
-func NewCCID(clientID uint32, connID uint32) (cc CCID) {
+func NewCCID(clientID ClientID, connID uint32) (cc CCID) {
 	c := uint64(clientID)
 	cc = CCID(c<<32 + uint64(connID))
 	return
 }
 
-// clientID return client id
-func (cc CCID) ClientID() uint32 {
-	return uint32(cc >> 32)
+// ClientID return client id
+func (cc CCID) ClientID() ClientID {
+	return ClientID(uint32(cc >> 32))
 }
 
 // ConnID return connection id
@@ -36,7 +36,7 @@ func (cc CCID) ConnID() uint32 {
 
 // ConnManager manage connections from listening from local port or connecting to remote server
 type ConnManager struct {
-	clientID uint32
+	clientID ClientID
 	//mode int
 	//newConnChannel  chan io.ReadWriteCloser
 
@@ -71,7 +71,7 @@ func NewConnManager() *ConnManager {
 
 	d := make([]byte, 4)
 	rand.Read(d)
-	clientID := binary.LittleEndian.Uint32(d)
+	clientID := ClientID(binary.LittleEndian.Uint32(d))
 
 	return &ConnManager{
 		clientID: clientID,
@@ -121,7 +121,7 @@ func (cm *ConnManager) ListenAndServe(addr string) error {
 
 	listener, err := net.ListenTCP("tcp", tcpAddr)
 	if err != nil {
-		panic(err)
+		log.Fatalf("Listen error: %s", err)
 	}
 
 	go cm.cleanUpCHPool()
@@ -134,7 +134,7 @@ func (cm *ConnManager) ListenAndServe(addr string) error {
 		// TODO graceful shutdown?
 		select {
 		case <-cm.quit:
-			log.Info("CM: Received quit signal")
+			log.Infof("CM: Received quit signal, listener info: %s", listener.Addr())
 			close(newConnChannel)
 			listener.Close()
 		}
@@ -305,7 +305,7 @@ func (cm *ConnManager) cleanUpCHPool() {
 			close(ch.ReadFromTunnelC)
 			delete(cm.connHandlerPool, ccid)
 			for _, v := range cm.connHandlerPool {
-				log.Warnf("%d", v.ConnID)
+				log.Debugf("CM: Alive connection handler with connection id: %d", v.ConnID)
 			}
 		}
 		cm.poolLock.Unlock()
@@ -361,7 +361,7 @@ func (cm *ConnManager) dispatch() {
 		}
 
 		// TODO fast open feature
-		if cm.fastOpen && !gf.IsControl() && gf.SeqNum == 0 {
+		if cm.fastOpen && !gf.IsControl() && gf.SeqNum == FastOpenInitSeqNum {
 			go func(gf *GotaFrame) {
 				// TODO connection is creating, delay this frame
 				cm.readFromTunnelC <- gf
@@ -384,7 +384,7 @@ type ConnHandler struct {
 	readStopped  bool
 	mutex        sync.Locker
 
-	ClientID uint32
+	ClientID ClientID
 	ConnID   uint32
 
 	cleanUpCHChan chan<- CCID
@@ -471,13 +471,14 @@ func (ch *ConnHandler) CreateFastOpenConn() {
 func (ch *ConnHandler) readFromTunnel() {
 	drop := func(c chan *GotaFrame) {
 		for gf := range c {
-			log.Warnf("CH: Connecition %d closed, Gota Frame dropped", gf.ConnID)
+			log.Warnf("CH: Connection %d closed, Gota Frame dropped", gf.ConnID)
 		}
 	}
 	defer func() {
 		ch.mutex.Lock()
 		defer ch.mutex.Unlock()
 
+		// TODO goroutines leak
 		go drop(ch.ReadFromTunnelC)
 
 		if cw, ok := ch.rw.(RWCloseWriter); ok {
@@ -720,7 +721,7 @@ func (c *ConnPool) ReadFromTunnel() {
 		if gf.Control && gf.SeqNum == TMCreateConnOKSeq {
 			c.connChannel <- gf.ConnID
 		} else {
-			log.Warnf("CP: Received unexcepte gota frame: %s", gf)
+			log.Warnf("CP: Received unaccepted gota frame: %s", gf)
 		}
 	}
 }

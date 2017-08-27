@@ -35,7 +35,7 @@ type GotaFrame struct {
 	Payload []byte
 
 	// client ID, only used for tunnel of gota internal
-	clientID uint32
+	clientID ClientID
 }
 
 // String for logging
@@ -130,6 +130,7 @@ func (gf *GotaFrame) UnmarshalBinary(data []byte) error {
 const MaxDataLength = 64 * 1024
 const MaxConnID = 1<<31 - 1
 const ControlFlagBit = 1 << 31
+const FastOpenInitSeqNum = 0
 
 // Connection Manage HeartBeat Time
 const TMHeartBeatSecond = 60
@@ -234,7 +235,7 @@ func ReadGotaFrame(r io.Reader) (*GotaFrame, error) {
 
 func EmbedClientIDHeaderToPayload(gf *GotaFrame) {
 	client := make([]byte, 4)
-	binary.LittleEndian.PutUint32(client, gf.clientID)
+	binary.LittleEndian.PutUint32(client, uint32(gf.clientID))
 
 	payload := make([]byte, 0, gf.Length+4)
 	payload = append(payload, client...)
@@ -245,7 +246,7 @@ func EmbedClientIDHeaderToPayload(gf *GotaFrame) {
 }
 
 func ParseClientIDHeaderFromPayload(gf *GotaFrame) {
-	client := binary.LittleEndian.Uint32(gf.Payload[:4])
+	client := ClientID(binary.LittleEndian.Uint32(gf.Payload[:4]))
 
 	gf.Payload = gf.Payload[4:]
 	gf.Length -= 4
