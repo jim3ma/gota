@@ -40,8 +40,9 @@ type ConnManager struct {
 	//mode int
 	//newConnChannel  chan io.ReadWriteCloser
 
-	newCCIDChannel chan CCID
-	cleanUpCHChan  chan CCID
+	newCCIDChannel        chan CCID
+	cleanUpCHChanCCID     chan CCID
+	cleanUpCHChanClientID chan ClientID
 
 	poolLock        *sync.RWMutex
 	connHandlerPool map[CCID]*ConnHandler
@@ -60,7 +61,8 @@ type ConnManager struct {
 // We should use the channels of this ConnManager to set up TunnelMangager
 func NewConnManager() *ConnManager {
 	ncc := make(chan CCID)
-	clean := make(chan CCID)
+	cleanCCID := make(chan CCID)
+	cleanClientID := make(chan ClientID)
 	chPool := make(map[CCID](*ConnHandler))
 	wc := make(chan *GotaFrame)
 	rc := make(chan *GotaFrame)
@@ -78,9 +80,10 @@ func NewConnManager() *ConnManager {
 		//mode: 0,
 		//newConnChannel: nc,
 
-		newCCIDChannel:  ncc,
-		cleanUpCHChan:   clean,
-		connHandlerPool: chPool,
+		newCCIDChannel:        ncc,
+		cleanUpCHChanCCID:     cleanCCID,
+		cleanUpCHChanClientID: cleanClientID,
+		connHandlerPool:       chPool,
 
 		writeToTunnelC:  wc,
 		readFromTunnelC: rc,
@@ -124,7 +127,8 @@ func (cm *ConnManager) ListenAndServe(addr string) error {
 		log.Fatalf("Listen error: %s", err)
 	}
 
-	go cm.cleanUpCHPool()
+	go cm.cleanUpCHPoolWithCCID()
+	go cm.cleanUpCHPoolWithClientID()
 	go cm.dispatch()
 
 	newConnChannel := make(chan io.ReadWriteCloser)
@@ -166,7 +170,8 @@ func (cm *ConnManager) Serve(addr string) {
 		panic(err)
 	}
 
-	go cm.cleanUpCHPool()
+	go cm.cleanUpCHPoolWithCCID()
+	go cm.cleanUpCHPoolWithClientID()
 	go cm.dispatch()
 	cm.handleNewCCID(tcpAddr)
 }
@@ -220,7 +225,7 @@ func (cm *ConnManager) dialAndCreateCH(cc CCID, addr *net.TCPAddr) {
 		ClientID:        cc.ClientID(),
 		ConnID:          cc.ConnID(),
 		rw:              conn,
-		cleanUpCHChan:   cm.cleanUpCHChan,
+		cleanUpCHChan:   cm.cleanUpCHChanCCID,
 		WriteToTunnelC:  cm.writeToTunnelC,
 		ReadFromTunnelC: rc,
 	}
@@ -258,7 +263,7 @@ func (cm *ConnManager) handleNewConn(newChannel chan io.ReadWriteCloser) {
 			ClientID:        cm.clientID,
 			ConnID:          cid,
 			rw:              c,
-			cleanUpCHChan:   cm.cleanUpCHChan,
+			cleanUpCHChan:   cm.cleanUpCHChanCCID,
 			WriteToTunnelC:  cm.writeToTunnelC,
 			ReadFromTunnelC: rc,
 			mutex:           mu,
@@ -296,8 +301,8 @@ func (cm *ConnManager) handleNewConn(newChannel chan io.ReadWriteCloser) {
 	}
 }
 
-func (cm *ConnManager) cleanUpCHPool() {
-	for ccid := range cm.cleanUpCHChan {
+func (cm *ConnManager) cleanUpCHPoolWithCCID() {
+	for ccid := range cm.cleanUpCHChanCCID {
 		cm.poolLock.Lock()
 		ch, ok := cm.connHandlerPool[ccid]
 		if ok {
@@ -309,6 +314,13 @@ func (cm *ConnManager) cleanUpCHPool() {
 			}
 		}
 		cm.poolLock.Unlock()
+	}
+}
+
+func (cm *ConnManager) cleanUpCHPoolWithClientID() {
+	for cid := range cm.cleanUpCHChanClientID {
+		log.Debugf("Clean up all Connection handler for Client ID: %d", cid)
+		cm.stopConnHandler(cid)
 	}
 }
 
@@ -326,7 +338,9 @@ func (cm *ConnManager) Stop() {
 	close(cm.writeToTunnelC)
 	close(cm.newCCIDChannel)
 	cm.stopAllConnHandler()
-	close(cm.cleanUpCHChan)
+	// TODO graceful close the channels
+	//close(cm.cleanUpCHChanCCID)
+	//close(cm.cleanUpCHChanClientID)
 }
 
 func (cm *ConnManager) stopAllConnHandler() {
@@ -335,6 +349,17 @@ func (cm *ConnManager) stopAllConnHandler() {
 	for k, v := range cm.connHandlerPool {
 		v.Stop()
 		delete(cm.connHandlerPool, k)
+	}
+}
+
+func (cm *ConnManager) stopConnHandler(client ClientID) {
+	cm.poolLock.Lock()
+	defer cm.poolLock.Unlock()
+	for k, v := range cm.connHandlerPool {
+		if k.ClientID() == client {
+			v.Stop()
+			delete(cm.connHandlerPool, k)
+		}
 	}
 }
 
@@ -355,7 +380,7 @@ func (cm *ConnManager) dispatch() {
 		if ok {
 			// TODO avoid hang here
 			log.Debugf("CM: Found CH in pool, ClientID: %d, ConnID: %d", ch.ClientID, ch.ConnID)
-			// TODO "send on closed channel" panic due to cm.cleanUpCHPool()
+			// TODO "send on closed channel" panic due to cm.cleanUpCHPoolWithCCID()
 			ch.ReadFromTunnelC <- gf
 			continue
 		}
@@ -460,7 +485,7 @@ func (ch *ConnHandler) CreateFastOpenConn() {
 	req := &GotaFrame{
 		Control:  true,
 		clientID: ch.ClientID,
-		SeqNum:   TMCreateConnSeq,
+		SeqNum:   TMCreateFastOpenConnSeq,
 		ConnID:   ch.ConnID,
 		Length:   0,
 	}
@@ -472,6 +497,7 @@ func (ch *ConnHandler) readFromTunnel() {
 	defer Recover()
 
 	drop := func(c chan *GotaFrame) {
+		//ch.cleanUpCHChan <- NewCCID(ch.ClientID, ch.ConnID)
 		for gf := range c {
 			log.Warnf("CH: Connection %d closed, Gota Frame dropped", gf.ConnID)
 		}
@@ -608,12 +634,12 @@ func (ch *ConnHandler) writeToTunnel() {
 			ch.sendCloseGotaFrame()
 			return
 		} else if err != nil {
-			// TODO when read error, the conneciont may be broken
+			// TODO when read error, the connection may be broken
 			ch.sendForceCloseGotaFrame()
 
 			// when call Stop function, the conn may be force closed
-			ch.mutex.Lock()
-			defer ch.mutex.Unlock()
+			//ch.mutex.Lock()
+			//defer ch.mutex.Unlock()
 
 			// ignore error for force stop
 			if !ch.writeStopped {

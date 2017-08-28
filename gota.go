@@ -17,6 +17,7 @@ func NewGota(config interface{}, auth *TunnelAuthCredential) *Gota {
 	tm.SetConfig(config)
 	tm.SetCCIDChannel(cm.NewCCIDChannel())
 	tm.SetClientID(cm.clientID)
+	//tm.cleanUpClientIDCh = cm.cleanUpCHChanClientID
 
 	return &Gota{
 		ConnManager:   cm,
