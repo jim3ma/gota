@@ -26,6 +26,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 )
 
@@ -52,7 +53,7 @@ var clientCmd = &cobra.Command{
 		}
 
 		go func() {
-			log.Println(http.ListenAndServe("localhost:6061", nil))
+			log.Debugln(http.ListenAndServe("localhost:6061", nil))
 		}()
 
 		userName := viper.GetString("auth.username")
@@ -91,20 +92,23 @@ var clientCmd = &cobra.Command{
 			sigs := make(chan os.Signal, 1)
 			signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 
+			wg := sync.WaitGroup{}
 			go func() {
 				sig := <-sigs
 				log.Infof("Received signal: %s, exit gota client", sig)
-				cmClosed := make(chan struct{})
+				wg.Add(2)
 				go func() {
 					client.ConnManager.Stop()
-					close(cmClosed)
+					wg.Done()
 				}()
-				client.TunnelManager.Stop()
-				<-cmClosed
-				os.Exit(0)
+				go func() {
+					client.TunnelManager.Stop()
+					wg.Done()
+				}()
 			}()
 
 			client.ListenAndServe(viper.GetString("listen"))
+			wg.Wait()
 		} else {
 			log.Error("Gota: Cann't parse tunnel config")
 		}

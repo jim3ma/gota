@@ -53,7 +53,7 @@ var serverCmd = &cobra.Command{
 		}
 
 		go func() {
-			log.Println(http.ListenAndServe("localhost:6060", nil))
+			log.Debugln(http.ListenAndServe("localhost:6060", nil))
 		}()
 
 		userName := viper.GetString("auth.username")
