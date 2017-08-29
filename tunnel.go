@@ -741,14 +741,14 @@ func (t *TunnelTransport) Stop() {
 	timeout := 0
 	for {
 		if t.readStopped && t.writeStopped {
-			return
+			break
 		}
 		if timeout < TMHeartBeatSecond {
 			time.Sleep(time.Second)
 			timeout++
 		} else {
 			t.rw.Close()
-			return
+			break
 		}
 	}
 	t.cleanUpClientIDCh <- t.clientID
