@@ -44,7 +44,9 @@ type TunnelManager struct {
 	ttPool []*TunnelTransport
 
 	newCCIDChannel    chan CCID
-	cleanUpClientIDCh chan ClientID
+
+	cleanUpReadPoolCh  chan ClientID
+	cleanUpWritePoolCh chan ClientID
 
 	writeToConnC  chan *GotaFrame
 	readFromConnC chan *GotaFrame
@@ -63,12 +65,14 @@ func NewTunnelManager(rc chan *GotaFrame, wc chan *GotaFrame, auth *TunnelAuthCr
 	quit := make(chan struct{})
 	mu := &sync.Mutex{}
 	pool := make([]*TunnelTransport, 0)
-	clean := make(chan ClientID)
+	cleanRead := make(chan ClientID)
+	cleanWrite := make(chan ClientID)
 	return &TunnelManager{
 		auth: auth,
 
-		newCCIDChannel:    nil,
-		cleanUpClientIDCh: clean,
+		newCCIDChannel:     nil,
+		cleanUpReadPoolCh:  cleanRead,
+		cleanUpWritePoolCh: cleanWrite,
 
 		readFromConnC: rc,
 		writeToConnC:  wc,
@@ -134,6 +138,8 @@ func (tm *TunnelManager) Start() {
 		tm.startPassiveMode()
 	}
 	go tm.readDispatch()
+	go tm.cleanUpReadPool()
+	go tm.cleanUpWritePool()
 	//go tm.writeDispatch()
 }
 
@@ -149,6 +155,8 @@ func (tm *TunnelManager) Stop() {
 	//close(tm.readPool)
 	//close(tm.writePool)
 	tm.stopAllTunnelTransport()
+	close(tm.cleanUpReadPoolCh)
+	close(tm.cleanUpWritePoolCh)
 }
 
 func (tm *TunnelManager) startActiveMode() {
@@ -270,7 +278,8 @@ func (tm *TunnelManager) listenAndServe(config TunnelPassiveConfig) {
 		tm.poolLock.Unlock()
 
 		tm.poolLock.RLock()
-		t := NewTunnelTransport(tm.writePool[client], tm.readPool[client], conn, PassiveMode, tm.cleanUpClientIDCh, client)
+		t := NewTunnelTransport(tm.writePool[client], tm.readPool[client], conn, PassiveMode,
+			tm.cleanUpReadPoolCh, tm.cleanUpWritePoolCh, client)
 		tm.poolLock.RUnlock()
 
 		t.SetCCIDChannel(tm.newCCIDChannel)
@@ -370,7 +379,8 @@ func (tm *TunnelManager) connectAndServe(config TunnelActiveConfig, client Clien
 	tm.poolLock.Unlock()
 
 	tm.poolLock.RLock()
-	t := NewTunnelTransport(tm.writePool[client], tm.readPool[client], conn, ActiveMode, tm.cleanUpClientIDCh, client)
+	t := NewTunnelTransport(tm.writePool[client], tm.readPool[client], conn, ActiveMode,
+		tm.cleanUpReadPoolCh, tm.cleanUpWritePoolCh, client)
 	tm.poolLock.RUnlock()
 
 	tm.ttPool = append(tm.ttPool, t)
@@ -394,7 +404,8 @@ func (tm *TunnelManager) readDispatch() {
 		// bug fixed for hang in listenAndServe
 		pool, ok := tm.readPool[client]
 		if !ok {
-			log.Errorf("TM: Read Pool for client %d didn't exist", client)
+			log.Warnf("TM: Read Pool for client %d didn't exist", client)
+			// TODO close all connection for non-exist client id
 			continue
 		}
 		tm.poolLock.RUnlock()
@@ -403,12 +414,12 @@ func (tm *TunnelManager) readDispatch() {
 		case c := <-pool:
 			c <- gf
 		case <-time.After(10 * time.Millisecond):
-			log.Warnf("TM: Timeout for read dispatch, Client ID: %d, retry backend", client)
+			log.Warnf("TM: Timeout for read dispatch, Client ID: %d, Gota Frame: %s, retry backend", client, gf)
 			_, ok := tm.readPool[client]
 			if !ok {
 				continue
 			}
-			go func() {
+			go func(gf *GotaFrame, client ClientID) {
 				tm.poolLock.RLock()
 				pool, ok := tm.readPool[client]
 				if !ok {
@@ -419,18 +430,26 @@ func (tm *TunnelManager) readDispatch() {
 				case c := <-pool:
 					c <- gf
 				case <-time.After(60 * time.Second):
-					log.Warnf("TM: Timeout for read dispatch, Client ID: %d, dropped", client)
+					log.Warnf("TM: Timeout for read dispatch, Client ID: %d, Gota Frame: %s, dropped", client, gf)
 					return
 				}
-			}()
+			}(gf, client)
 		}
 	}
 }
 
-func (tm *TunnelManager) cleanUpClientID() {
-	for cid := range tm.cleanUpClientIDCh {
+func (tm *TunnelManager) cleanUpReadPool() {
+	for cid := range tm.cleanUpReadPoolCh {
 		tm.poolLock.Lock()
 		delete(tm.readPool, cid)
+		tm.poolLock.Unlock()
+	}
+}
+
+func (tm *TunnelManager) cleanUpWritePool() {
+	for cid := range tm.cleanUpWritePoolCh {
+		tm.poolLock.Lock()
+		delete(tm.writePool, cid)
 		tm.poolLock.Unlock()
 	}
 }
@@ -474,7 +493,9 @@ type TunnelTransport struct {
 	timeout int
 
 	newCCIDChannel    chan CCID
-	cleanUpClientIDCh chan ClientID
+
+	cleanUpReadPoolCh  chan ClientID
+	cleanUpWritePoolCh chan ClientID
 
 	readPool    chan<- chan *GotaFrame
 	readChannel chan *GotaFrame
@@ -485,7 +506,7 @@ type TunnelTransport struct {
 	rw io.ReadWriteCloser
 }
 
-func NewTunnelTransport(wp, rp chan<- chan *GotaFrame, rw io.ReadWriteCloser, mode int, clean chan ClientID, clientID ...ClientID) *TunnelTransport {
+func NewTunnelTransport(wp, rp chan<- chan *GotaFrame, rw io.ReadWriteCloser, mode int, cleanRead chan ClientID, cleanWrite chan ClientID, clientID ...ClientID) *TunnelTransport {
 	var c ClientID
 	if clientID != nil {
 		c = clientID[0]
@@ -504,8 +525,9 @@ func NewTunnelTransport(wp, rp chan<- chan *GotaFrame, rw io.ReadWriteCloser, mo
 		clientID: c,
 		mode:     mode,
 
-		newCCIDChannel:    nil,
-		cleanUpClientIDCh: clean,
+		newCCIDChannel:     nil,
+		cleanUpReadPoolCh:  cleanRead,
+		cleanUpWritePoolCh: cleanWrite,
 
 		readPool:  rp,
 		writePool: wp,
@@ -535,6 +557,7 @@ func (t *TunnelTransport) readFromPeerTunnel() {
 			t.rw.Close()
 		}
 		//t.tryShutdown()
+		t.cleanUpWritePoolCh <- t.clientID
 	}()
 	defer Recover()
 	for {
@@ -621,7 +644,7 @@ func (t *TunnelTransport) writeToPeerTunnel() {
 			t.rw.Close()
 		}
 		//t.tryShutdown()
-		t.cleanUpClientIDCh <- t.clientID
+		t.cleanUpReadPoolCh <- t.clientID
 	}()
 	defer Recover()
 	tick := time.NewTicker(time.Second * TMHeartBeatTickerSecond)
@@ -752,7 +775,7 @@ func (t *TunnelTransport) Stop() {
 		}
 	}
 	// TODO clean up graceful
-	//t.cleanUpClientIDCh <- t.clientID
+	//t.cleanUpReadPoolCh <- t.clientID
 }
 
 func (t *TunnelTransport) Stopped() bool {

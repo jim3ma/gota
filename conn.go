@@ -309,9 +309,16 @@ func (cm *ConnManager) cleanUpCHPoolWithCCID() {
 			log.Debugf("CM: Clean up connection handler for connection: %d", ch.ConnID)
 			close(ch.ReadFromTunnelC)
 			delete(cm.connHandlerPool, ccid)
-			for _, v := range cm.connHandlerPool {
-				log.Debugf("CM: Alive connection handler with connection id: %d", v.ConnID)
+			if !IsVerbose() {
+				continue
 			}
+			cids := make([]uint32, len(cm.connHandlerPool))
+			idx := 0
+			for _, v := range cm.connHandlerPool {
+				cids[idx] = v.ConnID
+				idx ++
+			}
+			Verbosef("CM: Alive connection handler with connection id: %#d", cids )
 		}
 		cm.poolLock.Unlock()
 	}
@@ -391,14 +398,18 @@ func (cm *ConnManager) dispatch() {
 				// TODO connection is creating, delay this frame
 				cm.readFromTunnelC <- gf
 			}(gf)
-		} else {
-			// TODO connection pool feature
-			log.Errorf("CM: Connection didn't exist, client id: %d, connection id: %d, dropped.", gf.clientID, gf.ConnID)
+			continue
 		}
-		//if gf.IsControl() && (gf.SeqNum == TMCloseConnSeq || gf.SeqNum == TMCloseConnForceSeq) {
-		//	log.Debugf("CM: Received close connection signal for connection %d, delete it from connection pool", gf.ConnID)
-		//	delete(cm.connHandlerPool, NewCCID(gf.clientID, gf.ConnID))
-		//}
+
+		if gf.IsControl() && (gf.SeqNum == TMCloseConnSeq || gf.SeqNum == TMCloseConnForceSeq) {
+			log.Debugf("CM: Received close connection signal for connection %d, delete it from connection handler pool", gf.ConnID)
+			//	delete(cm.connHandlerPool, NewCCID(gf.clientID, gf.ConnID))
+			continue
+		}
+
+		// TODO connection pool feature
+		// TODO send to peer to close this connection
+		log.Errorf("CM: Connection didn't exist, client id: %d, gota frame: %s, dropped.", gf.clientID, gf)
 	}
 }
 
