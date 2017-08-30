@@ -23,6 +23,7 @@ func RuntimeInfo(depthList ...int) string {
 }
 
 const callerSkip = 1
+
 var verbose = false
 
 // GoFileName return the file name
@@ -56,7 +57,7 @@ func Recover() {
 	}
 }
 
-func SetVerbose(v bool){
+func SetVerbose(v bool) {
 	verbose = v
 }
 
@@ -64,7 +65,7 @@ func IsVerbose() bool {
 	return verbose
 }
 
-func Verbosef(format string, args ...interface{}){
+func Verbosef(format string, args ...interface{}) {
 	if verbose {
 		log.Debugf(format, args...)
 	}

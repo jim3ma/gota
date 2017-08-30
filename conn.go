@@ -316,18 +316,18 @@ func (cm *ConnManager) cleanUpCHPoolWithCCID() {
 			idx := 0
 			for _, v := range cm.connHandlerPool {
 				cids[idx] = v.ConnID
-				idx ++
+				idx++
 			}
-			Verbosef("CM: Alive connection handler with connection id: %#d", cids )
+			Verbosef("CM: Alive connection handler with connection id: %#d", cids)
 		}
 		cm.poolLock.Unlock()
 	}
 }
 
 func (cm *ConnManager) cleanUpCHPoolWithClientID() {
-	for cid := range cm.cleanUpCHChanClientID {
-		log.Debugf("Clean up all Connection handler for Client ID: %d", cid)
-		cm.stopConnHandler(cid)
+	for id := range cm.cleanUpCHChanClientID {
+		log.Debugf("Clean up all Connection handler for Client ID: %d", id)
+		cm.stopConnHandler(id)
 	}
 }
 

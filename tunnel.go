@@ -43,8 +43,9 @@ type TunnelManager struct {
 
 	ttPool []*TunnelTransport
 
-	newCCIDChannel    chan CCID
+	newCCIDChannel chan CCID
 
+	cleanUpAllConnCh   chan ClientID
 	cleanUpReadPoolCh  chan ClientID
 	cleanUpWritePoolCh chan ClientID
 
@@ -406,6 +407,9 @@ func (tm *TunnelManager) readDispatch() {
 		if !ok {
 			log.Warnf("TM: Read Pool for client %d didn't exist", client)
 			// TODO close all connection for non-exist client id
+			go func(id ClientID) {
+				tm.cleanUpAllConnCh <- id
+			}(client)
 			continue
 		}
 		tm.poolLock.RUnlock()
@@ -492,7 +496,7 @@ type TunnelTransport struct {
 
 	timeout int
 
-	newCCIDChannel    chan CCID
+	newCCIDChannel chan CCID
 
 	cleanUpReadPoolCh  chan ClientID
 	cleanUpWritePoolCh chan ClientID
