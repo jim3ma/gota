@@ -386,7 +386,7 @@ func (tm *TunnelManager) readDispatch() {
 		if !ok {
 			break
 		}
-		log.Debugf("TM: Received frame from CM: %s", gf)
+		Verbosef("TM: Received frame from CM: %s", gf)
 		// multiple client support
 		client := gf.clientID
 
@@ -449,7 +449,7 @@ func (tm *TunnelManager) writeDispatchForClient(client ClientID) {
 				return
 			}
 			gf := <-c
-			log.Debugf("TM: Send frame to CM: %s", gf)
+			Verbosef("TM: Send frame to CM: %s", gf)
 			tm.writeToConnC <- gf
 		}
 	}
@@ -552,7 +552,7 @@ func (t *TunnelTransport) readFromPeerTunnel() {
 		}
 		gf.clientID = t.clientID
 
-		log.Debugf("TT: Received gota frame header from peer: %s", gf)
+		Verbosef("TT: Received gota frame header from peer: %s", gf)
 
 		if gf.IsControl() {
 			switch gf.SeqNum {
@@ -636,7 +636,7 @@ Loop:
 			//log.Debugf("TT: Registered into the read worker queue: %d", &t.readPool)
 		case gf := <-t.readChannel:
 			// we have received a write request.
-			log.Debugf("TT: Send data frame header to peer: %s", gf)
+			Verbosef("TT: Send data frame header to peer: %s", gf)
 			rawBytes, err := gf.MarshalBinary()
 			if err != nil && nil != HeaderOnly {
 				log.Errorf("TT: Marshal GotaFrame error: %+v, skip", err)
@@ -751,7 +751,8 @@ func (t *TunnelTransport) Stop() {
 			break
 		}
 	}
-	t.cleanUpClientIDCh <- t.clientID
+	// TODO clean up graceful
+	//t.cleanUpClientIDCh <- t.clientID
 }
 
 func (t *TunnelTransport) Stopped() bool {

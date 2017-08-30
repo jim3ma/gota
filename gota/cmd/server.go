@@ -44,6 +44,7 @@ var serverCmd = &cobra.Command{
 		}
 
 		logLevel := viper.GetString("log")
+		gota.SetVerbose(viper.GetBool("verbose"))
 		gota.SetLogLevel(logLevel)
 		log.Info("Gota: Log Level: ", log.GetLevel())
 

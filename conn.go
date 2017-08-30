@@ -255,7 +255,7 @@ func (cm *ConnManager) handleNewConn(newChannel chan io.ReadWriteCloser) {
 	var cid uint32 = 0
 	for c := range newChannel {
 		// create and start a new ConnHandler with a new connection id, than append to cm.connHandlerPool
-		log.Debugf("CM: new connection, id: %d", cid)
+		log.Debugf("CM: New connection, id: %d", cid)
 		rc := make(chan *GotaFrame, 1)
 
 		mu := &sync.Mutex{}
@@ -373,13 +373,13 @@ func (cm *ConnManager) dispatch() {
 	}()
 
 	for gf := range cm.readFromTunnelC {
-		log.Debugf("CM: Received frame from tunnel: %s", gf)
+		Verbosef("CM: Received frame from tunnel: %s", gf)
 		cm.poolLock.RLock()
 		ch, ok := cm.connHandlerPool[NewCCID(gf.clientID, gf.ConnID)]
 		cm.poolLock.RUnlock()
 		if ok {
 			// TODO avoid hang here
-			log.Debugf("CM: Found CH in pool, ClientID: %d, ConnID: %d", ch.ClientID, ch.ConnID)
+			Verbosef("CM: Found CH in pool, ClientID: %d, ConnID: %d", ch.ClientID, ch.ConnID)
 			// TODO "send on closed channel" panic due to cm.cleanUpCHPoolWithCCID()
 			ch.ReadFromTunnelC <- gf
 			continue
@@ -527,7 +527,7 @@ func (ch *ConnHandler) readFromTunnel() {
 	log.Debugf("CH: Start to read from tunnel, ClientID: %d, ConnID: %d", ch.ClientID, ch.ConnID)
 
 	for gf := range ch.ReadFromTunnelC {
-		log.Debugf("CH: Received frame from CM: %s", gf)
+		Verbosef("CH: Received frame from CM: %s", gf)
 		if gf.IsControl() {
 			// TODO control signal handle
 			if gf.SeqNum == TMCloseConnSeq {
@@ -542,7 +542,7 @@ func (ch *ConnHandler) readFromTunnel() {
 		}
 
 		if gf.SeqNum == seq {
-			log.Debugf("CH: Received wanted data frame seq from tunnel: %d", seq)
+			Verbosef("CH: Received wanted data frame seq from tunnel: %d", seq)
 
 			err := WriteNBytes(ch.rw, gf.Length, gf.Payload)
 			if err != nil {
@@ -576,7 +576,7 @@ func (ch *ConnHandler) readFromTunnel() {
 			}
 		} else if gf.SeqNum > seq {
 			// cache for disorder frame
-			log.Debugf("CH: Received frame seq from tunnel: %d, but want to receive frame seq: %d, cache it",
+			Verbosef("CH: Received frame seq from tunnel: %d, but want to receive frame seq: %d, cache it",
 				gf.SeqNum, seq)
 			cache[gf.SeqNum] = gf.Payload
 		} else {
@@ -622,7 +622,7 @@ func (ch *ConnHandler) writeToTunnel() {
 				Length:   n,
 				Payload:  data[:n],
 			}
-			log.Debugf("CH: Received data from conn, %s", gf)
+			Verbosef("CH: Received data from conn, %s", gf)
 			seq += 1
 			ch.WriteToTunnelC <- gf
 		} else if n == 0 && err != io.EOF {
