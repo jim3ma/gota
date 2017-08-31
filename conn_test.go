@@ -3,13 +3,13 @@ package gota
 import (
 	"bytes"
 	"errors"
-	log "github.com/Sirupsen/logrus"
 	"io"
 	"net"
-	//"net/http"
 	_ "net/http/pprof"
 	"testing"
 	"time"
+
+	log "github.com/Sirupsen/logrus"
 )
 
 func TestNewCCID(t *testing.T) {

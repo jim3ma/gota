@@ -16,18 +16,18 @@ package cmd
 
 import (
 	"fmt"
-	log "github.com/Sirupsen/logrus"
 	"net"
-
-	"github.com/jim3ma/gota"
-	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
+
+	log "github.com/Sirupsen/logrus"
+	"github.com/jim3ma/gota"
+	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 // serverCmd represents the server command

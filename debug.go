@@ -2,10 +2,11 @@ package gota
 
 import (
 	"fmt"
-	log "github.com/Sirupsen/logrus"
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
+
+	log "github.com/Sirupsen/logrus"
 )
 
 // RuntimeInfo return a string containing the file name, function name
@@ -52,8 +53,8 @@ func GoFuncName() string {
 
 func Recover() {
 	if r := recover(); r != nil {
-		log.Errorf("Runtime error caught: \"%v\", runtime info: %s", r, RuntimeInfo(2))
-		log.Errorf("Call stack: %s", debug.Stack())
+		log.Warnf("Runtime error caught: \"%v\",\nRuntime info: %s, \nCall stack: %s",
+			r, RuntimeInfo(2), debug.Stack())
 	}
 }
 

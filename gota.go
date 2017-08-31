@@ -27,12 +27,16 @@ func NewGota(config interface{}, auth *TunnelAuthCredential) *Gota {
 
 // ListenAndServe listen at local for user connections and connect remote tunnel for forwarding traffic
 func (g *Gota) ListenAndServe(addr string) {
+	g.TunnelManager.mode = ActiveMode
+	g.ConnManager.mode = ActiveMode
 	go g.TunnelManager.Start()
 	g.ConnManager.ListenAndServe(addr)
 }
 
 // Serve listen at local for tunnels
 func (g *Gota) Serve(addr string) {
+	g.TunnelManager.mode = PassiveMode
+	g.ConnManager.mode = PassiveMode
 	go g.TunnelManager.Start()
 	g.ConnManager.Serve(addr)
 }

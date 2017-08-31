@@ -3,12 +3,13 @@ package gota
 import (
 	"crypto/rand"
 	"encoding/binary"
-	log "github.com/Sirupsen/logrus"
 	"io"
 	"math"
 	"net"
 	"sync"
 	"time"
+
+	log "github.com/Sirupsen/logrus"
 )
 
 // CCID combines client ID and connection ID into a uint64 for the key of map struct
@@ -55,6 +56,7 @@ type ConnManager struct {
 	quit    chan struct{}
 	stopped bool
 	mutex   sync.Locker
+	mode    int
 }
 
 // NewConnManager returns a new ConnManager,
@@ -394,6 +396,10 @@ func (cm *ConnManager) dispatch() {
 
 		// TODO fast open feature
 		if cm.fastOpen && !gf.IsControl() && gf.SeqNum == FastOpenInitSeqNum {
+			if cm.mode == ActiveMode {
+				log.Warnf("CM: ActiveMode should not receive this frame, may be a bug, Gota Frame: %s", gf)
+				continue
+			}
 			go func(gf *GotaFrame) {
 				// TODO connection is creating, delay this frame
 				cm.readFromTunnelC <- gf
@@ -641,7 +647,7 @@ func (ch *ConnHandler) writeToTunnel() {
 		}
 
 		if err == io.EOF {
-			log.Debugf("CH: Received io.EOF, start to close write connection on peer")
+			log.Debugf("CH: Received io.EOF from connection: %d, start to close write connection on peer", ch.ClientID)
 			ch.sendCloseGotaFrame()
 			return
 		} else if err != nil {

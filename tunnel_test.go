@@ -3,12 +3,12 @@ package gota
 import (
 	"bytes"
 	"io"
-	"testing"
-
-	log "github.com/Sirupsen/logrus"
 	"net"
 	"net/http"
+	"testing"
 	"time"
+
+	log "github.com/Sirupsen/logrus"
 )
 
 func TestTunnelManager_SetConfig(t *testing.T) {

@@ -4,13 +4,14 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	log "github.com/Sirupsen/logrus"
-	"golang.org/x/net/proxy"
 	"io"
 	"net"
 	"net/url"
 	"sync"
 	"time"
+
+	log "github.com/Sirupsen/logrus"
+	"golang.org/x/net/proxy"
 )
 
 type TunnelAuthCredential struct {
@@ -404,6 +405,7 @@ func (tm *TunnelManager) readDispatch() {
 		tm.poolLock.RLock()
 		// bug fixed for hang in listenAndServe
 		pool, ok := tm.readPool[client]
+		tm.poolLock.RUnlock()
 		if !ok {
 			log.Warnf("TM: Read Pool for client %d didn't exist", client)
 			// TODO close all connection for non-exist client id
@@ -412,7 +414,6 @@ func (tm *TunnelManager) readDispatch() {
 			}(client)
 			continue
 		}
-		tm.poolLock.RUnlock()
 
 		select {
 		case c := <-pool:
@@ -817,7 +818,7 @@ const (
 
 var modeMap map[string]int
 
-var TMErrUnsupportedConfig = errors.New("Unsupport configuration")
+var TMErrUnsupportedConfig = errors.New("Unsupported configuration")
 
 func init() {
 	modeMap = make(map[string]int)

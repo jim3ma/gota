@@ -2,10 +2,10 @@ package gota
 
 import (
 	"net/url"
+	"os"
 	"testing"
 
 	"golang.org/x/net/proxy"
-	"os"
 )
 
 func TestHttpProxy(t *testing.T) {

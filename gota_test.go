@@ -1,11 +1,12 @@
 package gota
 
 import (
-	log "github.com/Sirupsen/logrus"
 	"net"
 	"net/http"
 	"testing"
 	"time"
+
+	log "github.com/Sirupsen/logrus"
 )
 
 func TestGota_ListenAndServe(t *testing.T) {

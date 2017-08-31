@@ -16,10 +16,6 @@ package cmd
 
 import (
 	"fmt"
-	log "github.com/Sirupsen/logrus"
-	"github.com/jim3ma/gota"
-	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 	"net"
 	"net/http"
 	_ "net/http/pprof"
@@ -28,6 +24,11 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+
+	log "github.com/Sirupsen/logrus"
+	"github.com/jim3ma/gota"
+	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 // clientCmd represents the client command
@@ -77,7 +78,7 @@ var clientCmd = &cobra.Command{
 					}
 					clientConfig[i] = config
 				} else {
-					log.Errorf("Gota: Cann't parse tunnel config: %s", v)
+					log.Errorf("Gota: Can't parse tunnel config: %s", v)
 				}
 			}
 			client := gota.NewGota(clientConfig,
@@ -111,7 +112,7 @@ var clientCmd = &cobra.Command{
 			client.ListenAndServe(viper.GetString("listen"))
 			wg.Wait()
 		} else {
-			log.Error("Gota: Cann't parse tunnel config")
+			log.Error("Gota: Can't parse tunnel config")
 		}
 	},
 }
