@@ -556,14 +556,20 @@ func (t *TunnelTransport) SetCCIDChannel(c chan CCID) {
 }
 
 func (t *TunnelTransport) logStats() {
+	conn, ok := t.rw.(net.Conn)
+	if !ok {
+		return
+	}
+	info := fmt.Sprintf("local: %s, remote: %s", conn.LocalAddr(), conn.RemoteAddr())
 	for {
 		select {
 		case <-time.After(DefaultStatsSecond * time.Second):
-			log.Infof("TT: Statistic - send: %d, received: %d, total send speed: %d, total receive speed: %d",
-				t.stats.SentBytes, t.stats.ReceivedBytes, t.stats.SendSpeed(), t.stats.ReceiveSpeed())
-			log.Infof("TT: Statistic - current send speed in %d seconds: %d, current receive speed in %d seconds: %d",
-				DefaultStatsSecond, t.stats.SendSpeedSecond(DefaultStatsSecond),
-				DefaultStatsSecond, t.stats.ReceiveSpeedSecond(DefaultStatsSecond))
+			log.Infof("TT: Statistic - %s - send: %s, receive: %s, total send speed: %s/s, total receive speed: %s/s",
+				info, ByteSize(t.stats.SentBytes).String(), ByteSize(t.stats.ReceivedBytes).String(),
+				ByteSize(t.stats.SendSpeed()).String(), ByteSize(t.stats.ReceiveSpeed()).String())
+			log.Infof("TT: Statistic - %s - current send speed in %ds: %s/s, current receive speed in %ds: %s/s",
+				info, DefaultStatsSecond, ByteSize(t.stats.SendSpeedSecond(DefaultStatsSecond)).String(),
+				DefaultStatsSecond, ByteSize(t.stats.ReceiveSpeedSecond(DefaultStatsSecond)).String())
 		case <-t.quit:
 			return
 		}
