@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"testing"
+	"time"
 )
 
 func TestStatistic_AddSentBytes(t *testing.T) {
@@ -21,6 +22,38 @@ func TestStatistic_AddReceivedBytes(t *testing.T) {
 	s.AddReceivedBytes(sent)
 	if s.ReceivedBytes != 1024 {
 		t.Errorf("Error ReceivedBytes: %d", s.ReceivedBytes)
+	}
+}
+
+func TestStatistic_SendSpeedSecond(t *testing.T) {
+	s := NewStatistic(3)
+	s.AddSentBytes(10)
+	s.AddSentBytes(10)
+	time.Sleep(1*time.Second)
+	s.AddSentBytes(20)
+	s.AddSentBytes(10)
+	time.Sleep(1*time.Second)
+	s.AddSentBytes(30)
+	s.AddSentBytes(10)
+	ss := s.SendSpeedSecond(3)
+	if ss != 30 {
+		t.Errorf("Error speed: %d", ss)
+	}
+}
+
+func TestStatistic_ReceiveSpeedSecond(t *testing.T) {
+	s := NewStatistic(3)
+	s.AddReceivedBytes(10)
+	s.AddReceivedBytes(10)
+	time.Sleep(1*time.Second)
+	s.AddReceivedBytes(20)
+	s.AddReceivedBytes(10)
+	time.Sleep(1*time.Second)
+	s.AddReceivedBytes(30)
+	s.AddReceivedBytes(10)
+	ss := s.ReceiveSpeedSecond(3)
+	if ss != 30 {
+		t.Errorf("Error speed: %d", ss)
 	}
 }
 
