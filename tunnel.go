@@ -508,6 +508,8 @@ type TunnelTransport struct {
 	writeChannel chan *GotaFrame
 
 	rw io.ReadWriteCloser
+
+	stats *Statistic
 }
 
 func NewTunnelTransport(wp, rp chan<- chan *GotaFrame, rw io.ReadWriteCloser, mode int, cleanRead chan ClientID, cleanWrite chan ClientID, clientID ...ClientID) *TunnelTransport {
@@ -522,6 +524,8 @@ func NewTunnelTransport(wp, rp chan<- chan *GotaFrame, rw io.ReadWriteCloser, mo
 	wc := make(chan *GotaFrame)
 
 	quit := make(chan struct{})
+
+	stats := NewStatistic(DefaultStatsSecond)
 	return &TunnelTransport{
 		quit:  quit,
 		mutex: &sync.Mutex{},
@@ -539,7 +543,8 @@ func NewTunnelTransport(wp, rp chan<- chan *GotaFrame, rw io.ReadWriteCloser, mo
 		readChannel:  rc,
 		writeChannel: wc,
 
-		rw: rw,
+		rw:    rw,
+		stats: stats,
 	}
 }
 
@@ -547,6 +552,21 @@ func (t *TunnelTransport) SetCCIDChannel(c chan CCID) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	t.newCCIDChannel = c
+}
+
+func (t *TunnelTransport) logStats() {
+	for {
+		select {
+		case <-time.After(DefaultStatsSecond * time.Second):
+			log.Infof("TT: Statistic - send: %d, received: %d, total send speed: %d, total receive speed: %d",
+				t.stats.SentBytes, t.stats.ReceivedBytes, t.stats.SendSpeed(), t.stats.ReceiveSpeed())
+			log.Infof("TT: Statistic - current send speed in %d seconds: %d, current receive speed in %d seconds: %d",
+				DefaultStatsSecond, t.stats.SendSpeedSecond(DefaultStatsSecond),
+				DefaultStatsSecond, t.stats.ReceiveSpeedSecond(DefaultStatsSecond))
+		case <-t.quit:
+			return
+		}
+	}
 }
 
 // ReadFromTunnel reads from tunnel and send to connection manager
@@ -631,6 +651,7 @@ func (t *TunnelTransport) readFromPeerTunnel() {
 
 		select {
 		case t.writeChannel <- gf:
+			t.stats.AddReceivedBytes(uint64(gf.Length))
 		case <-t.quit:
 			return
 		}
@@ -664,6 +685,8 @@ Loop:
 		case gf := <-t.readChannel:
 			// we have received a write request.
 			Verbosef("TT: Send data frame header to peer: %s", gf)
+			t.stats.AddSentBytes(uint64(gf.Length))
+
 			rawBytes, err := gf.MarshalBinary()
 			if err != nil && nil != HeaderOnly {
 				log.Errorf("TT: Marshal GotaFrame error: %+v, skip", err)
@@ -746,6 +769,7 @@ func (t *TunnelTransport) sendCloseTunnelResponse() {
 func (t *TunnelTransport) Start() {
 	go t.readFromPeerTunnel()
 	go t.writeToPeerTunnel()
+	go t.logStats()
 }
 
 // Stop signals the worker to stop listening for work requests.

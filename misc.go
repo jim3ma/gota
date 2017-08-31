@@ -13,6 +13,8 @@ import (
 	log "github.com/Sirupsen/logrus"
 )
 
+const DefaultStatsSecond = 60
+
 // Statistic contains the traffic status
 type Statistic struct {
 	SentBytes     uint64
@@ -93,7 +95,10 @@ func (s *Statistic) SendSpeedSecond(n int64) uint64 {
 	cur := time.Now().Unix()
 	var bs uint64
 	s.sendRing.Do(func(value interface{}) {
-		ss := value.(*secondStats)
+		ss, ok := value.(*secondStats)
+		if !ok {
+			return
+		}
 		if cur-ss.unixTime <= n {
 			bs += ss.bytes
 		}
@@ -112,7 +117,10 @@ func (s *Statistic) ReceiveSpeedSecond(n int64) uint64 {
 	cur := time.Now().Unix()
 	var bs uint64
 	s.receivedRing.Do(func(value interface{}) {
-		ss := value.(*secondStats)
+		ss, ok := value.(*secondStats)
+		if !ok {
+			return
+		}
 		if cur-ss.unixTime <= n {
 			bs += ss.bytes
 		}

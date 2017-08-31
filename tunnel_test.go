@@ -157,12 +157,13 @@ func TestTunnelTransport_Start(t *testing.T) {
 
 	rp1 := make(chan chan *GotaFrame)
 	wp1 := make(chan chan *GotaFrame)
-	t1 := NewTunnelTransport(wp1, rp1, e1)
+	cc := make(chan ClientID)
+	t1 := NewTunnelTransport(wp1, rp1, e1, ActiveMode, cc, cc)
 	t1.Start()
 
 	rp2 := make(chan chan *GotaFrame)
 	wp2 := make(chan chan *GotaFrame)
-	t2 := NewTunnelTransport(wp2, rp2, e2)
+	t2 := NewTunnelTransport(wp2, rp2, e2, ActiveMode, cc, cc)
 	t2.Start()
 
 	//go t1.writeToPeerTunnel()

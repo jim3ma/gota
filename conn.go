@@ -409,7 +409,7 @@ func (cm *ConnManager) dispatch() {
 
 		// TODO connection pool feature
 		// TODO send to peer to close this connection
-		log.Errorf("CM: Connection didn't exist, client id: %d, gota frame: %s, dropped.", gf.clientID, gf)
+		log.Warnf("CM: Connection didn't exist, client id: %d, gota frame: %s, dropped.", gf.clientID, gf)
 	}
 }
 
