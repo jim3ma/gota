@@ -403,7 +403,6 @@ func (tm *TunnelManager) readDispatch() {
 		client := gf.clientID
 
 		tm.poolLock.RLock()
-		// bug fixed for hang in listenAndServe
 		pool, ok := tm.readPool[client]
 		tm.poolLock.RUnlock()
 		if !ok {
@@ -419,22 +418,26 @@ func (tm *TunnelManager) readDispatch() {
 		case c := <-pool:
 			c <- gf
 		case <-time.After(10 * time.Millisecond):
-			log.Warnf("TM: Timeout for read dispatch, Client ID: %d, Gota Frame: %s, retry backend", client, gf)
+			log.Warnf("TM: Timeout for read dispatch, Client ID: %d, Gota Frame: %s, retry async", client, gf)
+
+			tm.poolLock.RLock()
 			_, ok := tm.readPool[client]
+			tm.poolLock.RUnlock()
 			if !ok {
 				continue
 			}
 			go func(gf *GotaFrame, client ClientID) {
 				tm.poolLock.RLock()
 				pool, ok := tm.readPool[client]
+				tm.poolLock.RUnlock()
 				if !ok {
 					return
 				}
-				tm.poolLock.RUnlock()
 				select {
 				case c := <-pool:
 					c <- gf
-				case <-time.After(60 * time.Second):
+				case <-time.After(TMHeartBeatSecond * time.Second):
+					// TODO broken tunnel, should reconnect to peer when the mode is Active and stop this tunnel when the mode is Passive
 					log.Warnf("TM: Timeout for read dispatch, Client ID: %d, Gota Frame: %s, dropped", client, gf)
 					return
 				}
@@ -526,7 +529,7 @@ func NewTunnelTransport(wp, rp chan<- chan *GotaFrame, rw io.ReadWriteCloser, mo
 
 	quit := make(chan struct{})
 
-	stats := NewStatistic(DefaultStatsSecond)
+	stats := NewStatistic(TMStatReportSecond)
 	return &TunnelTransport{
 		quit:  quit,
 		mutex: &sync.Mutex{},
@@ -563,13 +566,13 @@ func (t *TunnelTransport) logStats() {
 	info := fmt.Sprintf("local: %s, remote: %s", conn.LocalAddr(), conn.RemoteAddr())
 	for {
 		select {
-		case <-time.After(DefaultStatsSecond * time.Second):
+		case <-time.After(TMStatReportSecond * time.Second):
 			log.Infof("TT: Statistic - %s - send: %s, receive: %s, total send speed: %s/s, total receive speed: %s/s",
 				info, ByteSize(t.stats.SentBytes).String(), ByteSize(t.stats.ReceivedBytes).String(),
 				ByteSize(t.stats.SendSpeed()).String(), ByteSize(t.stats.ReceiveSpeed()).String())
 			log.Infof("TT: Statistic - %s - current send speed in %ds: %s/s, current receive speed in %ds: %s/s",
-				info, DefaultStatsSecond, ByteSize(t.stats.SendSpeedSecond(DefaultStatsSecond)).String(),
-				DefaultStatsSecond, ByteSize(t.stats.ReceiveSpeedSecond(DefaultStatsSecond)).String())
+				info, TMStatReportSecond, ByteSize(t.stats.SendSpeedSecond(TMStatReportSecond)).String(),
+				TMStatReportSecond, ByteSize(t.stats.ReceiveSpeedSecond(TMStatReportSecond)).String())
 		case <-t.quit:
 			return
 		}

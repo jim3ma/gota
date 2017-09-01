@@ -131,12 +131,13 @@ const MaxDataLength = 64 * 1024
 const MaxConnID = 1<<31 - 1
 const ControlFlagBit = 1 << 31
 const FastOpenInitSeqNum = 0
+const FastOpenDelayNanosecond = 1000
 
 // Connection Manage HeartBeat Time
 const TMHeartBeatSecond = 60
 const TMHeartBeatTickerSecond = 600
 const TMHeartBeatTimeOutSecond = 3000
-const TMStatReportSecond = 30
+const TMStatReportSecond = 60
 
 const (
 	TMControlStartSeq = iota

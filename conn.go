@@ -356,25 +356,31 @@ func (cm *ConnManager) handleNewConn(newChannel chan io.ReadWriteCloser) {
 }
 
 func (cm *ConnManager) cleanUpCHPoolWithCCID() {
+	// when the connection is closed between remote and client, ConnHandler will send ccid into cm.cleanUpCHChanCCID
+	// to clean up cm.connHandlerPool
 	for ccid := range cm.cleanUpCHChanCCID {
-		cm.poolLock.Lock()
+		cm.poolLock.RLock()
 		ch, ok := cm.connHandlerPool[ccid]
+		cm.poolLock.RUnlock()
 		if ok {
 			log.Debugf("CM: Clean up connection handler for connection: %d", ch.ConnID)
-			close(ch.ReadFromTunnelC)
+			ch.Stop()
+			cm.poolLock.Lock()
 			delete(cm.connHandlerPool, ccid)
+			cm.poolLock.Unlock()
 			if !IsVerbose() {
 				continue
 			}
+			cm.poolLock.RLock()
 			cids := make([]uint32, len(cm.connHandlerPool))
 			idx := 0
 			for _, v := range cm.connHandlerPool {
 				cids[idx] = v.ConnID
 				idx++
 			}
+			cm.poolLock.RUnlock()
 			Verbosef("CM: Alive connection handler with connection id: %#d", cids)
 		}
-		cm.poolLock.Unlock()
 	}
 }
 
@@ -438,39 +444,61 @@ func (cm *ConnManager) dispatch() {
 
 	for gf := range cm.readFromTunnelC {
 		Verbosef("CM: Received frame from tunnel: %s", gf)
+
 		cm.poolLock.RLock()
 		ch, ok := cm.connHandlerPool[NewCCID(gf.clientID, gf.ConnID)]
 		cm.poolLock.RUnlock()
-		if ok {
-			// TODO avoid hang here
-			Verbosef("CM: Found CH in pool, ClientID: %d, ConnID: %d", ch.ClientID, ch.ConnID)
-			// TODO "send on closed channel" panic due to cm.cleanUpCHPoolWithCCID()
-			ch.ReadFromTunnelC <- gf
+
+		if gf.IsControl() && gf.SeqNum == TMCloseConnForceSeq {
+			log.Debugf("CM: Received force close connection signal for client: %d, connection %d, stop this conn handler",
+				gf.clientID, gf.ConnID)
+			if gf.SeqNum == TMCloseConnForceSeq {
+				ch.Stop()
+			}
 			continue
 		}
 
-		// TODO fast open feature
+		if ok {
+			Verbosef("CM: Found CH in pool, ClientID: %d, ConnID: %d", ch.ClientID, ch.ConnID)
+			// TODO "send on closed channel" panic due to cm.cleanUpCHPoolWithCCID()
+			select {
+			case ch.ReadFromTunnelC <- gf:
+			case <-time.After(10 * time.Nanosecond):
+				log.Warnf("CM: Conn handler receive Gota Frame timeout: %s, delivery the Gota Frame async", gf)
+				go func(gf *GotaFrame, ch *ConnHandler ) {
+					ch.ReadFromTunnelC <- gf
+				}(gf, ch)
+			}
+			continue
+		}
+
+		// fast open feature
 		if cm.fastOpen && !gf.IsControl() && gf.SeqNum == FastOpenInitSeqNum {
 			if cm.mode == ActiveMode {
 				log.Warnf("CM: ActiveMode should not receive this frame, may be a bug, Gota Frame: %s", gf)
 				continue
 			}
 			go func(gf *GotaFrame) {
-				// TODO connection is creating, delay this frame
+				// connection is creating, delay this frame
+				time.Sleep(FastOpenDelayNanosecond *time.Nanosecond)
 				cm.readFromTunnelC <- gf
 			}(gf)
 			continue
 		}
 
-		if gf.IsControl() && (gf.SeqNum == TMCloseConnSeq || gf.SeqNum == TMCloseConnForceSeq) {
-			log.Debugf("CM: Received close connection signal for connection %d, delete it from connection handler pool", gf.ConnID)
-			//	delete(cm.connHandlerPool, NewCCID(gf.clientID, gf.ConnID))
-			continue
-		}
-
-		// TODO connection pool feature
-		// TODO send to peer to close this connection
+		// send to peer to force close this non-exist connection
 		log.Warnf("CM: Connection didn't exist, client id: %d, gota frame: %s, dropped.", gf.clientID, gf)
+		go func(gf *GotaFrame) {
+			// force close again
+			gfx := &GotaFrame{
+				clientID: gf.clientID,
+				Control:  true,
+				ConnID:   gf.ConnID,
+				SeqNum:   TMCloseConnForceSeq,
+				Length:   0,
+			}
+			ch.WriteToTunnelC <- gfx
+		}(gf)
 	}
 }
 
@@ -782,7 +810,7 @@ func (c *ConnPool) createConn() {
 		log.Debugf("CP: Dial remote OK, local: %s, remote: %s", conn.LocalAddr(), conn.RemoteAddr())
 		select {
 		case c.connCH <- conn:
-			log.Debugf("CP: Sent conn to channel, local: %s, remote: %s", conn.LocalAddr(), conn.RemoteAddr())
+			log.Debugf("CP: Sent conn to CM, local: %s, remote: %s", conn.LocalAddr(), conn.RemoteAddr())
 		case <-c.quit:
 			return
 		}

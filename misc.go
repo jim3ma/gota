@@ -14,8 +14,6 @@ import (
 	log "github.com/Sirupsen/logrus"
 )
 
-const DefaultStatsSecond = 60
-
 type ByteSize float64
 
 const (
