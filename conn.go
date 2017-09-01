@@ -218,7 +218,7 @@ func (cm *ConnManager) useConnPoolCreateCH(cc CCID, addr *net.TCPAddr) {
 		ReadFromTunnelC: rc,
 	}
 
-	go ch.Start()
+	ch.Start()
 
 	cm.poolLock.Lock()
 	cm.connHandlerPool[cc] = ch
@@ -284,7 +284,7 @@ func (cm *ConnManager) dialAndCreateCH(cc CCID, addr *net.TCPAddr) {
 		ReadFromTunnelC: rc,
 	}
 
-	go ch.Start()
+	ch.Start()
 
 	cm.poolLock.Lock()
 	cm.connHandlerPool[cc] = ch
@@ -344,7 +344,7 @@ func (cm *ConnManager) handleNewConn(newChannel chan io.ReadWriteCloser) {
 				}
 				log.Debug("CM: Created peer connection")
 			}
-			go ch.Start()
+			ch.Start()
 		}()
 
 		if cid == MaxConnID {
@@ -435,11 +435,13 @@ func (cm *ConnManager) stopConnHandler(client ClientID) {
 
 func (cm *ConnManager) dispatch() {
 	defer func() {
-		if r := recover(); r != nil {
-			// TODO error handling
-			log.Errorf("CM: Recover from error: %s", r)
-			go cm.dispatch()
-		}
+		/*
+			if r := recover(); r != nil {
+				// TODO error handling
+				log.Errorf("CM: Recover from error: %s", r)
+				go cm.dispatch()
+			}
+		*/
 	}()
 
 	for gf := range cm.readFromTunnelC {
@@ -449,23 +451,24 @@ func (cm *ConnManager) dispatch() {
 		ch, ok := cm.connHandlerPool[NewCCID(gf.clientID, gf.ConnID)]
 		cm.poolLock.RUnlock()
 
-		if gf.IsControl() && gf.SeqNum == TMCloseConnForceSeq {
-			log.Debugf("CM: Received force close connection signal for client: %d, connection %d, stop this conn handler",
-				gf.clientID, gf.ConnID)
-			if gf.SeqNum == TMCloseConnForceSeq {
-				ch.Stop()
-			}
-			continue
-		}
-
 		if ok {
+			if gf.IsControl() && gf.SeqNum == TMCloseConnForceSeq {
+				log.Debugf("CM: Received force close connection signal for client: %d, connection %d, stop this conn handler",
+					gf.clientID, gf.ConnID)
+				if gf.SeqNum == TMCloseConnForceSeq {
+					ch.Stop()
+				}
+				continue
+			}
+
 			Verbosef("CM: Found CH in pool, ClientID: %d, ConnID: %d", ch.ClientID, ch.ConnID)
 			// TODO "send on closed channel" panic due to cm.cleanUpCHPoolWithCCID()
+			// delivery the packet to Conn Handler
 			select {
 			case ch.ReadFromTunnelC <- gf:
 			case <-time.After(10 * time.Nanosecond):
 				log.Warnf("CM: Conn handler receive Gota Frame timeout: %s, delivery the Gota Frame async", gf)
-				go func(gf *GotaFrame, ch *ConnHandler ) {
+				go func(gf *GotaFrame, ch *ConnHandler) {
 					ch.ReadFromTunnelC <- gf
 				}(gf, ch)
 			}
@@ -480,7 +483,7 @@ func (cm *ConnManager) dispatch() {
 			}
 			go func(gf *GotaFrame) {
 				// connection is creating, delay this frame
-				time.Sleep(FastOpenDelayNanosecond *time.Nanosecond)
+				time.Sleep(FastOpenDelayNanosecond * time.Nanosecond)
 				cm.readFromTunnelC <- gf
 			}(gf)
 			continue
@@ -488,6 +491,10 @@ func (cm *ConnManager) dispatch() {
 
 		// send to peer to force close this non-exist connection
 		log.Warnf("CM: Connection didn't exist, client id: %d, gota frame: %s, dropped.", gf.clientID, gf)
+		// avoid loop from client and server
+		if gf.SeqNum == TMCloseConnForceSeq {
+			continue
+		}
 		go func(gf *GotaFrame) {
 			// force close again
 			gfx := &GotaFrame{
@@ -497,7 +504,7 @@ func (cm *ConnManager) dispatch() {
 				SeqNum:   TMCloseConnForceSeq,
 				Length:   0,
 			}
-			ch.WriteToTunnelC <- gfx
+			cm.writeToTunnelC <- gfx
 		}(gf)
 	}
 }
@@ -646,8 +653,8 @@ func (ch *ConnHandler) readFromTunnel() {
 
 			err := WriteNBytes(ch.rw, gf.Length, gf.Payload)
 			if err != nil {
-				log.Errorf("CH: Write to connection error: %s", err)
-				// TODO when write error, the conneciont may be broken
+				log.Errorf("CH: Write to connection error: %s, ClientID: %d, Conn ID: %d", err, ch.ClientID, ch.ConnID)
+				// TODO when write error, the connection may be broken
 				ch.sendForceCloseGotaFrame()
 				return
 			}
@@ -662,8 +669,8 @@ func (ch *ConnHandler) readFromTunnel() {
 				if data, ok := cache[seq]; ok {
 					err := WriteNBytes(ch.rw, len(data), data)
 					if err != nil {
-						log.Errorf("CH: Write to connection error: %s", err)
-						// TODO when write error, the conneciont may be broken
+						log.Errorf("CH: Write to connection error: %s, ClientID: %d, Conn ID: %d", err, ch.ClientID, ch.ConnID)
+						// TODO when write error, the connection may be broken
 						ch.sendForceCloseGotaFrame()
 						return
 					}
@@ -676,11 +683,11 @@ func (ch *ConnHandler) readFromTunnel() {
 			}
 		} else if gf.SeqNum > seq {
 			// cache for disorder frame
-			Verbosef("CH: Received frame seq from tunnel: %d, but want to receive frame seq: %d, cache it",
-				gf.SeqNum, seq)
+			Verbosef("CH: Received frame seq from tunnel: %d, but want to receive frame seq: %d, cache it, gf: %s",
+				gf.SeqNum, seq, gf)
 			cache[gf.SeqNum] = gf.Payload
 		} else {
-			log.Warnf("CH: Received frame seq from tunnel: %d, but the data frame already sent, dropped", gf.SeqNum)
+			log.Warnf("CH: Received frame seq from tunnel: %d, but the data frame already sent, dropped, gf: %s", gf.SeqNum, gf)
 		}
 	}
 }
@@ -726,7 +733,7 @@ func (ch *ConnHandler) writeToTunnel() {
 			seq += 1
 			ch.WriteToTunnelC <- gf
 		} else if n == 0 && err != io.EOF {
-			log.Warn("CH: Received empty data from connection")
+			log.Warnf("CH: Received empty data from connection, ClientID: %d, Conn ID: %d", ch.ClientID, ch.ConnID)
 		}
 
 		if err == io.EOF {
@@ -743,7 +750,7 @@ func (ch *ConnHandler) writeToTunnel() {
 
 			// ignore error for force stop
 			if !ch.writeStopped {
-				log.Errorf("CH: Read from connection error: %+v", err)
+				log.Errorf("CH: Read from connection error: %+v, ClientID: %d", err, ch.ClientID, ch.ConnID)
 			}
 			return
 		}
