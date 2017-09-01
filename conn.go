@@ -57,6 +57,10 @@ type ConnManager struct {
 	stopped bool
 	mutex   sync.Locker
 	mode    int
+
+	useConnPool   bool
+	connPool      *ConnPool
+	connPoolCount int
 }
 
 // NewConnManager returns a new ConnManager,
@@ -104,6 +108,11 @@ func (cm *ConnManager) NewCCIDChannel() chan CCID {
 
 func (cm *ConnManager) EnableFastOpen() {
 	cm.fastOpen = true
+}
+
+func (cm *ConnManager) SetConnPool(n int) {
+	cm.useConnPool = true
+	cm.connPoolCount = n
 }
 
 // WriteToTunnelChannel returns the channel to write to tunnel
@@ -179,10 +188,53 @@ func (cm *ConnManager) Serve(addr string) {
 }
 
 func (cm *ConnManager) handleNewCCID(addr *net.TCPAddr) {
+	if cm.useConnPool {
+		cm.connPool = NewConnPool(cm.connPoolCount, addr)
+		cm.connPool.Start()
+	}
 	for cc := range cm.newCCIDChannel {
 		log.Debugf("CM: New CCID comes from tunnel, CCID: %d, Client ID: %d, ConnID: %d",
 			cc, cc.ClientID(), cc.ConnID())
-		go cm.dialAndCreateCH(cc, addr)
+
+		if cm.useConnPool {
+			go cm.useConnPoolCreateCH(cc, addr)
+		} else {
+			go cm.dialAndCreateCH(cc, addr)
+		}
+	}
+}
+
+func (cm *ConnManager) useConnPoolCreateCH(cc CCID, addr *net.TCPAddr) {
+	conn := <-cm.connPool.connCH
+	log.Debugf("CM: Fetch conn from Conn Pool for ClientID: %d, ConnID: %d", cc.ClientID(), cc.ConnID())
+
+	rc := make(chan *GotaFrame, 1)
+	ch := &ConnHandler{
+		ClientID:        cc.ClientID(),
+		ConnID:          cc.ConnID(),
+		rw:              conn,
+		cleanUpCHChan:   cm.cleanUpCHChanCCID,
+		WriteToTunnelC:  cm.writeToTunnelC,
+		ReadFromTunnelC: rc,
+	}
+
+	go ch.Start()
+
+	cm.poolLock.Lock()
+	cm.connHandlerPool[cc] = ch
+	cm.poolLock.Unlock()
+
+	// TODO enable fast open
+	if !cm.fastOpen {
+		// send response after created the connection
+		resp := &GotaFrame{
+			Control:  true,
+			ConnID:   cc.ConnID(),
+			clientID: cc.ClientID(),
+			SeqNum:   TMCreateConnOKSeq,
+			Length:   0,
+		}
+		cm.writeToTunnelC <- resp
 	}
 }
 
@@ -347,6 +399,9 @@ func (cm *ConnManager) Stop() {
 	close(cm.writeToTunnelC)
 	close(cm.newCCIDChannel)
 	cm.stopAllConnHandler()
+	if cm.useConnPool {
+		cm.connPool.Stop()
+	}
 	// TODO graceful close the channels
 	//close(cm.cleanUpCHChanCCID)
 	//close(cm.cleanUpCHChanClientID)
@@ -690,88 +745,48 @@ func (ch *ConnHandler) sendForceCloseGotaFrame() {
 }
 
 type ConnPool struct {
-	count       int
-	connChannel chan uint32
-	quit        chan struct{}
-	fastOpen    bool
+	count  int
+	connCH chan io.ReadWriteCloser
 
-	WriteToTunnelChan  chan *GotaFrame
-	ReadFromTunnelChan chan *GotaFrame
+	quit chan struct{}
+
+	addr *net.TCPAddr
 }
 
-func NewConnPool(n int, fastOpen bool, rc, wc chan *GotaFrame) *ConnPool {
-	c := make(chan uint32, n-1)
+func NewConnPool(n int, addr *net.TCPAddr) *ConnPool {
+	ch := make(chan io.ReadWriteCloser, n)
 	quit := make(chan struct{})
 	return &ConnPool{
-		count:       n,
-		connChannel: c,
-		quit:        quit,
-		fastOpen:    fastOpen,
-
-		WriteToTunnelChan:  wc,
-		ReadFromTunnelChan: rc,
+		count:  n,
+		connCH: ch,
+		quit:   quit,
+		addr:   addr,
 	}
 }
 
 func (c *ConnPool) Start() {
+	go c.createConn()
+}
+
+func (c *ConnPool) Stop() {
+	close(c.quit)
 }
 
 func (c *ConnPool) createConn() {
 	for {
-		// create a peer connection
-		connID := uint32(666)
-
-		// send create request
-		req := &GotaFrame{
-			Control: true,
-			SeqNum:  TMCreateConnSeq,
-			ConnID:  connID,
-			Length:  0,
+		conn, err := net.DialTCP("tcp", nil, c.addr)
+		if err != nil {
+			log.Errorf("CP: Can't dial remote addr: %s", c.addr.String())
+			time.Sleep(time.Second)
 		}
-		c.WriteToTunnelChan <- req
-
+		log.Debugf("CP: Dial remote OK, local: %s, remote: %s", conn.LocalAddr(), conn.RemoteAddr())
 		select {
-		case c.connChannel <- connID:
+		case c.connCH <- conn:
+			log.Debugf("CP: Sent conn to channel, local: %s, remote: %s", conn.LocalAddr(), conn.RemoteAddr())
 		case <-c.quit:
 			return
 		}
 	}
-}
-
-func (c *ConnPool) createConnWithFastOpen() {
-	for {
-		// create a peer connection
-		connID := uint32(666)
-
-		// send create request
-		req := &GotaFrame{
-			Control: true,
-			SeqNum:  TMCreateConnSeq,
-			ConnID:  connID,
-			Length:  0,
-		}
-		c.WriteToTunnelChan <- req
-
-		select {
-		case c.connChannel <- connID:
-		case <-c.quit:
-			return
-		}
-	}
-}
-
-func (c *ConnPool) ReadFromTunnel() {
-	for gf := range c.ReadFromTunnelChan {
-		if gf.Control && gf.SeqNum == TMCreateConnOKSeq {
-			c.connChannel <- gf.ConnID
-		} else {
-			log.Warnf("CP: Received unaccepted gota frame: %s", gf)
-		}
-	}
-}
-
-func (c *ConnPool) GetConnID() uint32 {
-	return <-c.connChannel
 }
 
 var cache sync.Pool

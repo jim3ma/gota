@@ -15,6 +15,9 @@ auth:
 remote: 127.0.0.1:8080
 
 fastopen: true
+pool:
+  enable: true
+  count: 3
 
 # tunnel listen address with port
 tunnel:
