@@ -60,6 +60,8 @@ var serverCmd = &cobra.Command{
 		userName := viper.GetString("auth.username")
 		password := viper.GetString("auth.password")
 
+		whiteIPs := viper.GetStringSlice("whiteips")
+
 		tunnel := viper.Get("tunnel")
 		if t, ok := tunnel.([]interface{}); ok {
 			clientConfig := make([]gota.TunnelPassiveConfig, len(t))
@@ -81,6 +83,7 @@ var serverCmd = &cobra.Command{
 					Password: password,
 				})
 
+			client.TunnelManager.SetWhiteIPs(whiteIPs)
 			if viper.GetBool("fastopen") {
 				client.ConnManager.EnableFastOpen()
 			}

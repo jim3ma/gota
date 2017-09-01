@@ -12,6 +12,7 @@ import (
 
 	log "github.com/Sirupsen/logrus"
 	"golang.org/x/net/proxy"
+	"strings"
 )
 
 type TunnelAuthCredential struct {
@@ -32,7 +33,9 @@ type TunnelPassiveConfig struct {
 type ClientID = uint32
 
 type TunnelManager struct {
-	auth *TunnelAuthCredential
+	auth     *TunnelAuthCredential
+	whiteIPs []*net.IPNet
+
 	// only uesd for active mode
 	clientID ClientID
 	mode     int
@@ -121,6 +124,14 @@ func (tm *TunnelManager) SetConfig(config interface{}) error {
 	return nil
 }
 
+func (tm *TunnelManager) SetWhiteIPs(s []string) {
+	ips := make([]*net.IPNet, len(s))
+	for i, v := range s {
+		_, ips[i], _ = net.ParseCIDR(v)
+	}
+	tm.whiteIPs = ips
+}
+
 func (tm *TunnelManager) SetCCIDChannel(c chan CCID) {
 	tm.mutex.Lock()
 	defer tm.mutex.Unlock()
@@ -203,6 +214,17 @@ func (tm *TunnelManager) listenAndServe(config TunnelPassiveConfig) {
 		}
 	}()
 
+	// Authenticate start
+	var username string
+	var password string
+	if tm.auth == nil {
+		username = "gota"
+		password = "gota"
+	} else {
+		username = tm.auth.UserName
+		password = tm.auth.Password
+	}
+
 	for {
 		conn, err := listener.AcceptTCP()
 		if err != nil {
@@ -221,19 +243,25 @@ func (tm *TunnelManager) listenAndServe(config TunnelPassiveConfig) {
 			}
 		}
 
-		log.Infof("TM: Accept Connection from: %s", conn.RemoteAddr())
-		// TODO set Client ID
-
-		// Authenticate start
-		var username string
-		var password string
-		if tm.auth == nil {
-			username = "gota"
-			password = "gota"
-		} else {
-			username = tm.auth.UserName
-			password = tm.auth.Password
+		if len(tm.whiteIPs) != 0 {
+			addr := strings.Split(conn.RemoteAddr().String(), ":")
+			ip := net.ParseIP(addr[0])
+			ok := false
+			for _, ipm := range tm.whiteIPs {
+				ipx := ip.Mask(ipm.Mask)
+				if ipx.Equal(ipm.IP) {
+					ok = true
+					break
+				}
+			}
+			if !ok {
+				log.Debugf("TM: IP Address is not in white list, addr: %s", conn.RemoteAddr())
+				conn.Close()
+				continue
+			}
 		}
+
+		log.Infof("TM: Accept Connection from: %s", conn.RemoteAddr())
 
 		request, err := ReadGotaFrame(conn)
 		if err != nil {

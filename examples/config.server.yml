@@ -10,6 +10,10 @@ auth:
   username: gota
   password: gota
 
+# white list for remote ip
+#whiteips:
+#  - 127.0.0.1/32
+
 # remote address with port for forwarding traffic
 # suppose you want to speed up you 8080 port
 remote: 127.0.0.1:8080
@@ -17,7 +21,7 @@ remote: 127.0.0.1:8080
 fastopen: true
 pool:
   enable: true
-  count: 3
+  count: 10
 
 # tunnel listen address with port
 tunnel:
