@@ -18,7 +18,10 @@ else
   exit 1
 fi
 
-VERSION=`grep -oP "(?<=version = \").*(?=\")" $GOTA_DIR/gota.go`
+COMMIT=`git rev-parse HEAD`
+VERSION=`git rev-parse --abbrev-ref HEAD`
+sed -i "s/gota_commit/${COMMIT}/" gota.go
+sed -i "s/gota_version/${VERSION}/" gota.go
 
 mkdir -p $OUTPUT
 
@@ -49,3 +52,5 @@ do
     $GO build -o $OUTPUT/$BINARY $GOTA_DIR/gota/main.go
   (cd $OUTPUT; GZIP=-9 tar cvzpf ${BINARY}.tar.gz ${BINARY}; rm ${BINARY})
 done
+
+git checkout -- gota.go
