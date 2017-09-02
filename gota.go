@@ -2,7 +2,7 @@ package gota
 
 var (
 	Version = "gota_version"
-	Commit = "gota_commit"
+	Commit  = "gota_commit"
 )
 
 // Gota provides quick usage for gota

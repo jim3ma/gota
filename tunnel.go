@@ -7,12 +7,12 @@ import (
 	"io"
 	"net"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
 	log "github.com/Sirupsen/logrus"
 	"golang.org/x/net/proxy"
-	"strings"
 )
 
 type TunnelAuthCredential struct {
@@ -236,10 +236,11 @@ func (tm *TunnelManager) listenAndServe(config TunnelPassiveConfig) {
 				// TODO if encounter network error, restart
 				log.Errorf("TM: Accept Connection Error: %s", err)
 				log.Info("TM: Restart Tunnel with Configuration: %+v", config)
-				go tm.listenAndServe(config)
 
 				// close the routine for listening graceful shutdown
 				close(restart)
+				listener.Close()
+				go tm.listenAndServe(config)
 			}
 		}
 

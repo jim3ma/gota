@@ -37,7 +37,6 @@ var clientCmd = &cobra.Command{
 	Short: "Gota client",
 	Long:  `Gota client`,
 	Run: func(cmd *cobra.Command, args []string) {
-		// TODO: Work your own magic here
 		if viper.Get("mode") == "client" {
 			log.Info("Gota: Work in client mode")
 		} else {

@@ -208,34 +208,7 @@ func (cm *ConnManager) useConnPoolCreateCH(cc CCID, addr *net.TCPAddr) {
 	conn := <-cm.connPool.connCH
 	log.Debugf("CM: Fetch conn from Conn Pool for ClientID: %d, ConnID: %d", cc.ClientID(), cc.ConnID())
 
-	rc := make(chan *GotaFrame, 1)
-	ch := &ConnHandler{
-		ClientID:        cc.ClientID(),
-		ConnID:          cc.ConnID(),
-		rw:              conn,
-		cleanUpCHChan:   cm.cleanUpCHChanCCID,
-		WriteToTunnelC:  cm.writeToTunnelC,
-		ReadFromTunnelC: rc,
-	}
-
-	ch.Start()
-
-	cm.poolLock.Lock()
-	cm.connHandlerPool[cc] = ch
-	cm.poolLock.Unlock()
-
-	// TODO enable fast open
-	if !cm.fastOpen {
-		// send response after created the connection
-		resp := &GotaFrame{
-			Control:  true,
-			ConnID:   cc.ConnID(),
-			clientID: cc.ClientID(),
-			SeqNum:   TMCreateConnOKSeq,
-			Length:   0,
-		}
-		cm.writeToTunnelC <- resp
-	}
+	cm.createConnHandler(cc, conn)
 }
 
 func (cm *ConnManager) dialAndCreateCH(cc CCID, addr *net.TCPAddr) {
@@ -255,10 +228,8 @@ func (cm *ConnManager) dialAndCreateCH(cc CCID, addr *net.TCPAddr) {
 			time.Sleep(time.Second * time.Duration(sec))
 		}
 
-		if retry >= MaxRetryTimes {
+		if retry >= CHMaxRetryTimes {
 			log.Debugf("CM: Create a new connection to remote error after retry %d times", retry)
-
-			// TODO enable fast open
 
 			// send response after created the connection error
 			resp := &GotaFrame{
@@ -273,7 +244,11 @@ func (cm *ConnManager) dialAndCreateCH(cc CCID, addr *net.TCPAddr) {
 			return
 		}
 	}
-	log.Debugf("CM: Dial remote complete for ClientID: %d, ConnID: %d", cc.ClientID(), cc.ConnID())
+
+	cm.createConnHandler(cc, conn)
+}
+
+func (cm *ConnManager) createConnHandler(cc CCID, conn io.ReadWriteCloser) {
 	rc := make(chan *GotaFrame, 1)
 	ch := &ConnHandler{
 		ClientID:        cc.ClientID(),
@@ -283,14 +258,11 @@ func (cm *ConnManager) dialAndCreateCH(cc CCID, addr *net.TCPAddr) {
 		WriteToTunnelC:  cm.writeToTunnelC,
 		ReadFromTunnelC: rc,
 	}
-
 	ch.Start()
-
 	cm.poolLock.Lock()
 	cm.connHandlerPool[cc] = ch
 	cm.poolLock.Unlock()
-
-	// TODO enable fast open
+	// when disable fast open, send a response
 	if !cm.fastOpen {
 		// send response after created the connection
 		resp := &GotaFrame{
@@ -302,7 +274,6 @@ func (cm *ConnManager) dialAndCreateCH(cc CCID, addr *net.TCPAddr) {
 		}
 		cm.writeToTunnelC <- resp
 	}
-
 }
 
 func (cm *ConnManager) handleNewConn(newChannel chan io.ReadWriteCloser) {
@@ -327,7 +298,7 @@ func (cm *ConnManager) handleNewConn(newChannel chan io.ReadWriteCloser) {
 		cm.poolLock.Unlock()
 		// TODO send to a work pool for performance reason
 		go func() {
-			// TODO fast open feature
+			// fast open feature
 			if cm.fastOpen {
 				log.Debug("CM: Try to create peer connection with fast open")
 				ch.CreateFastOpenConn()
@@ -654,7 +625,7 @@ func (ch *ConnHandler) readFromTunnel() {
 			err := WriteNBytes(ch.rw, gf.Length, gf.Payload)
 			if err != nil {
 				log.Errorf("CH: Write to connection error: %s, ClientID: %d, Conn ID: %d", err, ch.ClientID, ch.ConnID)
-				// TODO when write error, the connection may be broken
+				// when write error, the connection may be broken
 				ch.sendForceCloseGotaFrame()
 				return
 			}
@@ -670,7 +641,7 @@ func (ch *ConnHandler) readFromTunnel() {
 					err := WriteNBytes(ch.rw, len(data), data)
 					if err != nil {
 						log.Errorf("CH: Write to connection error: %s, ClientID: %d, Conn ID: %d", err, ch.ClientID, ch.ConnID)
-						// TODO when write error, the connection may be broken
+						// when write error, the connection may be broken
 						ch.sendForceCloseGotaFrame()
 						return
 					}
@@ -741,16 +712,12 @@ func (ch *ConnHandler) writeToTunnel() {
 			ch.sendCloseGotaFrame()
 			return
 		} else if err != nil {
-			// TODO when read error, the connection may be broken
+			// when read error, the connection may be broken
 			ch.sendForceCloseGotaFrame()
-
-			// when call Stop function, the conn may be force closed
-			//ch.mutex.Lock()
-			//defer ch.mutex.Unlock()
 
 			// ignore error for force stop
 			if !ch.writeStopped {
-				log.Errorf("CH: Read from connection error: %+v, ClientID: %d", err, ch.ClientID, ch.ConnID)
+				log.Errorf("CH: Read from connection error: %+v, ClientID: %d, Conn ID: %d", err, ch.ClientID, ch.ConnID)
 			}
 			return
 		}
@@ -812,6 +779,11 @@ func (c *ConnPool) createConn() {
 		conn, err := net.DialTCP("tcp", nil, c.addr)
 		if err != nil {
 			log.Errorf("CP: Can't dial remote addr: %s", c.addr.String())
+			select {
+			case <-c.quit:
+				return
+			default:
+			}
 			time.Sleep(time.Second)
 		}
 		log.Debugf("CP: Dial remote OK, local: %s, remote: %s", conn.LocalAddr(), conn.RemoteAddr())
@@ -819,6 +791,7 @@ func (c *ConnPool) createConn() {
 		case c.connCH <- conn:
 			log.Debugf("CP: Sent conn to CM, local: %s, remote: %s", conn.LocalAddr(), conn.RemoteAddr())
 		case <-c.quit:
+			conn.Close()
 			return
 		}
 	}
@@ -826,7 +799,7 @@ func (c *ConnPool) createConn() {
 
 var cache sync.Pool
 
-const MaxRetryTimes = 3
+const CHMaxRetryTimes = 3
 
 func init() {
 	cache = sync.Pool{

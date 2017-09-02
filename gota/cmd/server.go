@@ -36,7 +36,6 @@ var serverCmd = &cobra.Command{
 	Short: "Gota server",
 	Long:  `Gota server`,
 	Run: func(cmd *cobra.Command, args []string) {
-		// TODO: Work your own magic here
 		if viper.Get("mode") == "server" {
 			log.Info("Gota: Work in server mode")
 		} else {
