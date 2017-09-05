@@ -19,7 +19,7 @@ else
 fi
 
 COMMIT=`git rev-parse HEAD`
-VERSION=`git rev-parse --abbrev-ref HEAD`
+VERSION=`git name-rev --tags --name-only $(git rev-parse HEAD)`
 sed -i "s/gota_commit/${COMMIT}/" gota.go
 sed -i "s/gota_version/${VERSION}/" gota.go
 
