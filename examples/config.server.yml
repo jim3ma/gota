@@ -18,7 +18,12 @@ auth:
 # suppose you want to speed up you 8080 port
 remote: 127.0.0.1:8080
 
+# PS: try to enable fastopen and pool for speed up connection time
+
+# fast open in server
 fastopen: true
+
+# connection pool in server
 pool:
   enable: true
   count: 10

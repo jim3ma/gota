@@ -40,6 +40,7 @@ mode: server
 
 # log level: info debug warn error fatal panic
 log: debug
+verbose: true
 
 # tunnel authenticate credential
 auth:
@@ -72,14 +73,29 @@ mode: client
 
 # log level: info debug warn error fatal panic
 log: debug
+verbose: true
 
 # tunnel authenticate credential
 auth:
   username: gota
   password: gota
 
+# white list for remote ip
+#whiteips:
+#  - 127.0.0.1/32
+
 # local listen address with port
 listen: 127.0.0.1:12363
+
+# PS: try to enable fastopen and pool for speed up connection time
+
+# fast open in server
+fastopen: true
+
+# connection pool in server
+pool:
+  enable: true
+  count: 10
 
 # Gota server addresses with port
 tunnel:
