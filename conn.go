@@ -513,16 +513,19 @@ func (ch *ConnHandler) Start() {
 func (ch *ConnHandler) Stop() {
 	ch.mutex.Lock()
 	defer ch.mutex.Unlock()
-	if ch.readStopped && ch.writeStopped {
-		return
+	select {
+	case _, ok := <- ch.ReadFromTunnelC:
+		if !ok {
+			return
+		}
+	default:
+		close(ch.ReadFromTunnelC)
+
+		// force close the conn, because when read the conn, the goroutine will hang there.
+		ch.rw.Close()
+		// when force close the conn, discard the latest read error
+		ch.writeStopped = true
 	}
-
-	close(ch.ReadFromTunnelC)
-
-	// force close the conn, because when read the conn, the goroutine will hang there.
-	ch.rw.Close()
-	// when force close the conn, discard the latest read error
-	ch.writeStopped = true
 }
 
 // Stopped return the connection handler's current status
@@ -778,7 +781,7 @@ func (c *ConnPool) createConn() {
 	for {
 		conn, err := net.DialTCP("tcp", nil, c.addr)
 		if err != nil {
-			log.Errorf("CP: Can't dial remote addr: %s", c.addr.String())
+			log.Warnf("CP: Can't dial remote addr: %s, retry later", c.addr.String())
 			select {
 			case <-c.quit:
 				return
