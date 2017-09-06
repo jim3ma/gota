@@ -106,7 +106,7 @@ var serverCmd = &cobra.Command{
 			}()
 
 			if viper.GetBool("pool.enable") {
-				client.ConnManager.SetConnPool(viper.GetInt("pool.count"))
+				client.ConnManager.SetConnPool(viper.GetInt("pool.count"), viper.GetInt("pool.keepalive"))
 			}
 			client.Serve(viper.GetString("remote"))
 			wg.Wait()

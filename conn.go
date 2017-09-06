@@ -1,6 +1,7 @@
 package gota
 
 import (
+	"container/list"
 	"crypto/rand"
 	"encoding/binary"
 	"io"
@@ -61,6 +62,7 @@ type ConnManager struct {
 	useConnPool   bool
 	connPool      *ConnPool
 	connPoolCount int
+	connPoolAlive int
 }
 
 // NewConnManager returns a new ConnManager,
@@ -110,9 +112,17 @@ func (cm *ConnManager) EnableFastOpen() {
 	cm.fastOpen = true
 }
 
-func (cm *ConnManager) SetConnPool(n int) {
+func (cm *ConnManager) SetConnPool(n int, alive int) {
 	cm.useConnPool = true
+	if n == 0 {
+		n = DefaultConnCount
+	}
+	if alive == 0 {
+		alive = DefaultConnAliveSecond
+	}
+
 	cm.connPoolCount = n
+	cm.connPoolAlive = alive
 }
 
 // WriteToTunnelChannel returns the channel to write to tunnel
@@ -158,14 +168,15 @@ func (cm *ConnManager) ListenAndServe(addr string) error {
 		conn, err := listener.AcceptTCP()
 		if err != nil {
 			cm.mutex.Lock()
-			defer cm.mutex.Unlock()
 
 			// ignore error when call function Stop()
 			if cm.stopped {
+				cm.mutex.Unlock()
 				return nil
 			}
 
 			log.Errorf("CM: Accept Connection Error: %s", err)
+			cm.mutex.Unlock()
 			return err
 		}
 		log.Debugf("CM: Received new connection from %s", conn.RemoteAddr())
@@ -189,7 +200,7 @@ func (cm *ConnManager) Serve(addr string) {
 
 func (cm *ConnManager) handleNewCCID(addr *net.TCPAddr) {
 	if cm.useConnPool {
-		cm.connPool = NewConnPool(cm.connPoolCount, addr)
+		cm.connPool = NewConnPool(cm.connPoolCount, cm.connPoolAlive, addr)
 		cm.connPool.Start()
 	}
 	for cc := range cm.newCCIDChannel {
@@ -205,7 +216,7 @@ func (cm *ConnManager) handleNewCCID(addr *net.TCPAddr) {
 }
 
 func (cm *ConnManager) useConnPoolCreateCH(cc CCID, addr *net.TCPAddr) {
-	conn := <-cm.connPool.connCH
+	conn := cm.connPool.Fetch()
 	log.Debugf("CM: Fetch conn from Conn Pool for ClientID: %d, ConnID: %d", cc.ClientID(), cc.ConnID())
 
 	cm.createConnHandler(cc, conn)
@@ -406,13 +417,11 @@ func (cm *ConnManager) stopConnHandler(client ClientID) {
 
 func (cm *ConnManager) dispatch() {
 	defer func() {
-		/*
-			if r := recover(); r != nil {
-				// TODO error handling
-				log.Errorf("CM: Recover from error: %s", r)
-				go cm.dispatch()
-			}
-		*/
+		if r := recover(); r != nil {
+			// TODO error handling
+			log.Errorf("CM: Recover from error: %s", r)
+			go cm.dispatch()
+		}
 	}()
 
 	for gf := range cm.readFromTunnelC {
@@ -514,7 +523,7 @@ func (ch *ConnHandler) Stop() {
 	ch.mutex.Lock()
 	defer ch.mutex.Unlock()
 	select {
-	case _, ok := <- ch.ReadFromTunnelC:
+	case _, ok := <-ch.ReadFromTunnelC:
 		if !ok {
 			return
 		}
@@ -749,54 +758,152 @@ func (ch *ConnHandler) sendForceCloseGotaFrame() {
 	ch.WriteToTunnelC <- gf
 }
 
-type ConnPool struct {
-	count  int
-	connCH chan io.ReadWriteCloser
+const DefaultConnCount = 10
+const DefaultConnAliveSecond = 120
 
-	quit chan struct{}
+type ConnPool struct {
+	maxCount int
+	connCH   chan io.ReadWriteCloser
+
+	connList  *list.List
+	aliveTime int
+	prepareCh chan struct{}
+	produceCh chan struct{}
+
+	quit  chan struct{}
+	mutex sync.Locker
 
 	addr *net.TCPAddr
 }
 
-func NewConnPool(n int, addr *net.TCPAddr) *ConnPool {
-	ch := make(chan io.ReadWriteCloser, n)
+func NewConnPool(n int, alive int, addr *net.TCPAddr) *ConnPool {
+	ch := make(chan io.ReadWriteCloser)
+	list := list.New()
 	quit := make(chan struct{})
+	pre := make(chan struct{})
+	prod := make(chan struct{})
+	mutex := &sync.Mutex{}
 	return &ConnPool{
-		count:  n,
-		connCH: ch,
-		quit:   quit,
-		addr:   addr,
+		maxCount:  n,
+		connCH:    ch,
+		connList:  list,
+		aliveTime: alive,
+		prepareCh: pre,
+		produceCh: prod,
+		quit:      quit,
+		mutex:     mutex,
+		addr:      addr,
 	}
 }
 
+type connWithTime struct {
+	rw         io.ReadWriteCloser
+	createTime time.Time
+}
+
 func (c *ConnPool) Start() {
-	go c.createConn()
+	//go c.createConn()
+	go c.dispatch()
+	go c.produce()
+	go c.keepalive()
 }
 
 func (c *ConnPool) Stop() {
 	close(c.quit)
 }
 
-func (c *ConnPool) createConn() {
+func (c *ConnPool) Fetch() io.ReadWriteCloser {
+	c.prepareCh <- struct{}{}
+	return <-c.connCH
+}
+
+func (c *ConnPool) dispatch() {
 	for {
-		conn, err := net.DialTCP("tcp", nil, c.addr)
-		if err != nil {
-			log.Warnf("CP: Can't dial remote addr: %s, retry later", c.addr.String())
-			select {
-			case <-c.quit:
-				return
-			default:
-			}
-			time.Sleep(time.Second)
-		}
-		log.Debugf("CP: Dial remote OK, local: %s, remote: %s", conn.LocalAddr(), conn.RemoteAddr())
 		select {
-		case c.connCH <- conn:
-			log.Debugf("CP: Sent conn to CM, local: %s, remote: %s", conn.LocalAddr(), conn.RemoteAddr())
+		case <-c.prepareCh:
+			c.mutex.Lock()
+			e := c.connList.Front()
+			for e == nil {
+				c.mutex.Unlock()
+				c.produceCh <- struct{}{}
+				c.mutex.Lock()
+				e = c.connList.Front()
+			}
+			conn := e.Value.(connWithTime)
+			c.connCH <- conn.rw
+			c.connList.Remove(e)
+			c.mutex.Unlock()
+			c.produceCh <- struct{}{}
 		case <-c.quit:
-			conn.Close()
 			return
 		}
+	}
+}
+
+func (c *ConnPool) produce() {
+	for {
+		select {
+		case <-c.produceCh:
+			Verbosef("CP: Keep alive try to create new connection")
+			c.mutex.Lock()
+			if c.connList.Len() < c.maxCount {
+				conn, err := net.DialTCP("tcp", nil, c.addr)
+				if err != nil {
+					log.Warnf("CP: Can't dial remote addr: %s, retry later", c.addr.String())
+					select {
+					case <-c.quit:
+						return
+					default:
+					}
+					time.Sleep(time.Second)
+				}
+
+				log.Debugf("CP: Dial remote OK, local: %s, remote: %s", conn.LocalAddr(), conn.RemoteAddr())
+
+				c.connList.PushBack(connWithTime{
+					createTime: time.Now(),
+					rw:         conn,
+				})
+			}
+			c.mutex.Unlock()
+		case <-c.quit:
+			return
+		}
+	}
+}
+
+func (c *ConnPool) keepalive() {
+	c.sendProduceSignal()
+	for {
+		select {
+		case <-time.After(60 * time.Second):
+			c.mutex.Lock()
+			for e := c.connList.Front(); e != nil; {
+				Verbosef("CP: Keep alive check time out: %#v", e.Value)
+				if conn, ok := e.Value.(connWithTime); ok {
+					if time.Now().Sub(conn.createTime).Seconds() >= float64(c.aliveTime) {
+						log.Debugf("CP: Keep alive time out: %#v, closed", conn)
+						conn.rw.Close()
+						ee := e
+						e = e.Next()
+						c.connList.Remove(ee)
+						continue
+					}
+				}
+				e = e.Next()
+			}
+			c.mutex.Unlock()
+			c.sendProduceSignal()
+		case <-c.quit:
+			return
+		}
+	}
+}
+
+func (c *ConnPool) sendProduceSignal() {
+	count := c.maxCount - c.connList.Len()
+	for i := 0; i < count; i++ {
+		c.produceCh <- struct{}{}
 	}
 }
 
