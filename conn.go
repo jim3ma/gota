@@ -117,9 +117,6 @@ func (cm *ConnManager) SetConnPool(n int, alive int) {
 	if n == 0 {
 		n = DefaultConnCount
 	}
-	if alive == 0 {
-		alive = DefaultConnAliveSecond
-	}
 
 	cm.connPoolCount = n
 	cm.connPoolAlive = alive
@@ -462,6 +459,8 @@ func (cm *ConnManager) dispatch() {
 				continue
 			}
 			go func(gf *GotaFrame) {
+				defer Recover()
+				// TODO send on closed channel
 				// connection is creating, delay this frame
 				time.Sleep(FastOpenDelayNanosecond * time.Nanosecond)
 				cm.readFromTunnelC <- gf
@@ -594,8 +593,6 @@ func (ch *ConnHandler) readFromTunnel() {
 	}
 	defer func() {
 		ch.mutex.Lock()
-		defer ch.mutex.Unlock()
-
 		// TODO goroutines leak
 		go drop(ch.ReadFromTunnelC)
 
@@ -605,6 +602,7 @@ func (ch *ConnHandler) readFromTunnel() {
 			ch.rw.Close()
 		}
 		ch.readStopped = true
+		ch.mutex.Unlock()
 		if ch.writeStopped {
 			ch.cleanUpCHChan <- NewCCID(ch.ClientID, ch.ConnID)
 		}
@@ -680,7 +678,6 @@ func (ch *ConnHandler) writeToTunnel() {
 
 	defer func() {
 		ch.mutex.Lock()
-		defer ch.mutex.Unlock()
 
 		if cw, ok := ch.rw.(RWCloseReader); ok {
 			cw.CloseRead()
@@ -688,6 +685,7 @@ func (ch *ConnHandler) writeToTunnel() {
 			ch.rw.Close()
 		}
 		ch.writeStopped = true
+		ch.mutex.Unlock()
 		if ch.readStopped {
 			ch.cleanUpCHChan <- NewCCID(ch.ClientID, ch.ConnID)
 		}
@@ -874,9 +872,13 @@ func (c *ConnPool) produce() {
 
 func (c *ConnPool) keepalive() {
 	c.sendProduceSignal()
+	if c.aliveTime == 0 {
+		log.Debugf("CP: Keepalive disabled")
+		return
+	}
 	for {
 		select {
-		case <-time.After(60 * time.Second):
+		case <-time.After(time.Duration(c.aliveTime) * time.Second):
 			c.mutex.Lock()
 			for e := c.connList.Front(); e != nil; {
 				Verbosef("CP: Keep alive check time out: %#v", e.Value)
