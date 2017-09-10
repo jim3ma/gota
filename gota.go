@@ -11,10 +11,15 @@ type Gota struct {
 	TunnelManager *TunnelManager
 }
 
+func init() {
+	setupSIGUSR1Trap()
+}
+
 // NewGota returns a Gota with mounted ConnManager and TunnelManager
 func NewGota(config interface{}, auth *TunnelAuthCredential) *Gota {
 	cm := NewConnManager()
-	tm := NewTunnelManager(cm.WriteToTunnelChannel(), cm.ReadFromTunnelChannel(), auth)
+	tm := NewTunnelManager(cm.WriteToTunnelChannel(), cm.ReadFromTunnelChannel(), TMAuth(auth))
+
 	tm.SetConfig(config)
 	tm.SetCCIDChannel(cm.NewCCIDChannel())
 	tm.SetClientID(cm.clientID)

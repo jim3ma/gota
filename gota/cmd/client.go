@@ -15,6 +15,7 @@
 package cmd
 
 import (
+	_ "expvar"
 	"fmt"
 	"net"
 	"net/http"
@@ -25,10 +26,11 @@ import (
 	"sync"
 	"syscall"
 
-	log "github.com/Sirupsen/logrus"
 	"github.com/jim3ma/gota"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+
+	log "github.com/Sirupsen/logrus"
 )
 
 // clientCmd represents the client command
