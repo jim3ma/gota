@@ -39,8 +39,6 @@ func (cc CCID) ConnID() uint32 {
 // ConnManager manage connections from listening from local port or connecting to remote server
 type ConnManager struct {
 	clientID ClientID
-	//mode int
-	//newConnChannel  chan io.ReadWriteCloser
 
 	newCCIDChannel        chan CCID
 	cleanUpCHChanCCID     chan CCID
@@ -85,8 +83,6 @@ func NewConnManager() *ConnManager {
 
 	return &ConnManager{
 		clientID: clientID,
-		//mode: 0,
-		//newConnChannel: nc,
 
 		newCCIDChannel:        ncc,
 		cleanUpCHChanCCID:     cleanCCID,
@@ -122,12 +118,12 @@ func (cm *ConnManager) SetConnPool(n int, alive int) {
 	cm.connPoolAlive = alive
 }
 
-// WriteToTunnelChannel returns the channel to write to tunnel
+// WriteToTunnelChannel returns the channel which ConnHandler should use to write to tunnel
 func (cm *ConnManager) WriteToTunnelChannel() chan *GotaFrame {
 	return cm.writeToTunnelC
 }
 
-// ReadFromTunnelChannel returns the channel to read from tunnel
+// ReadFromTunnelChannel returns the channel which ConnHandler should use to read from tunnel
 func (cm *ConnManager) ReadFromTunnelChannel() chan *GotaFrame {
 	return cm.readFromTunnelC
 }
@@ -153,7 +149,6 @@ func (cm *ConnManager) ListenAndServe(addr string) error {
 	go cm.handleNewConn(newConnChannel)
 
 	go func() {
-		// TODO graceful shutdown?
 		select {
 		case <-cm.quit:
 			log.Infof("CM: Received quit signal, listener info: %s", listener.Addr())
@@ -304,7 +299,7 @@ func (cm *ConnManager) handleNewConn(newChannel chan io.ReadWriteCloser) {
 		cm.poolLock.Lock()
 		cm.connHandlerPool[NewCCID(cm.clientID, cid)] = ch
 		cm.poolLock.Unlock()
-		// TODO send to a work pool for performance reason
+
 		go func() {
 			// fast open feature
 			if cm.fastOpen {
@@ -432,9 +427,7 @@ func (cm *ConnManager) dispatch() {
 			if gf.IsControl() && gf.SeqNum == TMCloseConnForceSeq {
 				log.Debugf("CM: Received force close connection signal for client: %d, connection %d, stop this conn handler",
 					gf.clientID, gf.ConnID)
-				if gf.SeqNum == TMCloseConnForceSeq {
-					ch.Stop()
-				}
+				ch.Stop()
 				continue
 			}
 
@@ -453,6 +446,7 @@ func (cm *ConnManager) dispatch() {
 		}
 
 		// fast open feature
+		// TODO maybe a bug for multiple init seq num for fast open
 		if cm.fastOpen && !gf.IsControl() && gf.SeqNum == FastOpenInitSeqNum {
 			if cm.mode == ActiveMode {
 				log.Warnf("CM: ActiveMode should not receive this frame, may be a bug, Gota Frame: %s", gf)
@@ -467,6 +461,8 @@ func (cm *ConnManager) dispatch() {
 			}(gf)
 			continue
 		}
+
+		// non-exist connection
 
 		// send to peer to force close this non-exist connection
 		log.Warnf("CM: Connection didn't exist, client id: %d, gota frame: %s, dropped.", gf.clientID, gf)
@@ -502,12 +498,6 @@ type ConnHandler struct {
 
 	WriteToTunnelC  chan *GotaFrame
 	ReadFromTunnelC chan *GotaFrame
-}
-
-func NewConnHandler(rw io.ReadWriteCloser) *ConnHandler {
-	return &ConnHandler{
-		rw: rw,
-	}
 }
 
 // Start forward traffic between local request and remote response
@@ -593,7 +583,7 @@ func (ch *ConnHandler) readFromTunnel() {
 	}
 	defer func() {
 		ch.mutex.Lock()
-		// TODO goroutines leak
+		// avoid CM hang in cm.dispatch
 		go drop(ch.ReadFromTunnelC)
 
 		if cw, ok := ch.rw.(RWCloseWriter); ok {
@@ -776,7 +766,7 @@ type ConnPool struct {
 
 func NewConnPool(n int, alive int, addr *net.TCPAddr) *ConnPool {
 	ch := make(chan io.ReadWriteCloser)
-	list := list.New()
+	lst := list.New()
 	quit := make(chan struct{})
 	pre := make(chan struct{})
 	prod := make(chan struct{})
@@ -784,7 +774,7 @@ func NewConnPool(n int, alive int, addr *net.TCPAddr) *ConnPool {
 	return &ConnPool{
 		maxCount:  n,
 		connCH:    ch,
-		connList:  list,
+		connList:  lst,
 		aliveTime: alive,
 		prepareCh: pre,
 		produceCh: prod,

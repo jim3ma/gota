@@ -60,6 +60,7 @@ type TunnelManager struct {
 	readPool  map[ClientID]chan chan *GotaFrame
 	writePool map[ClientID]chan chan *GotaFrame
 
+	// TODO reconnect gota server
 	reConnect     bool
 	reConnectCh   chan interface{}
 	reConnectTime time.Duration
@@ -221,7 +222,6 @@ func (tm *TunnelManager) listenAndServe(config TunnelPassiveConfig) {
 	restart := make(chan struct{})
 
 	go func() {
-		// TODO graceful shutdown?
 		select {
 		case <-tm.quit:
 			log.Infof("TM: Received quit signal, listener info: %s", listener.Addr())
@@ -332,8 +332,7 @@ func (tm *TunnelManager) listenAndServe(config TunnelPassiveConfig) {
 		t.SetCCIDChannel(tm.newCCIDChannel)
 		tm.ttPool = append(tm.ttPool, t)
 
-		//go tm.readDispatchForClient(client)
-		go tm.writeDispatchForClient(client)
+		go tm.writeDispatch(client)
 		go t.Start()
 	}
 }
@@ -433,7 +432,7 @@ func (tm *TunnelManager) connectAndServe(config TunnelActiveConfig, client Clien
 	tm.ttPool = append(tm.ttPool, t)
 
 	//go tm.readDispatchForClient(client)
-	go tm.writeDispatchForClient(client)
+	go tm.writeDispatch(client)
 	t.Start()
 }
 
@@ -463,11 +462,13 @@ func (tm *TunnelManager) readDispatch() {
 		case c := <-pool:
 			c <- gf
 		case <-time.After(10 * time.Millisecond):
-			log.Warnf("TM: Timeout for read dispatch, Client ID: %d, Gota Frame: %s, retry async", client, gf)
+			log.Warnf("TM: Timeout for read dispatch, Client ID: %d, Gota Frame: %s, retry in background", client, gf)
 
+			// double check to reduce goroutines
 			tm.poolLock.RLock()
 			_, ok := tm.readPool[client]
 			tm.poolLock.RUnlock()
+			// peer TT closed
 			if !ok {
 				continue
 			}
@@ -475,6 +476,7 @@ func (tm *TunnelManager) readDispatch() {
 				tm.poolLock.RLock()
 				pool, ok := tm.readPool[client]
 				tm.poolLock.RUnlock()
+				// peer TT closed
 				if !ok {
 					return
 				}
@@ -528,7 +530,8 @@ func (tm *TunnelManager) cleanUpWritePool() {
 	}
 }
 
-func (tm *TunnelManager) writeDispatchForClient(client ClientID) {
+// multiple clients support
+func (tm *TunnelManager) writeDispatch(client ClientID) {
 	pool := tm.writePool[client]
 
 	if tm.clientID != 0 {
@@ -685,59 +688,57 @@ func (t *TunnelTransport) readFromPeerTunnel() {
 
 		Verbosef("TT: Received gota frame header from peer: %s", gf)
 
-		if gf.IsControl() {
-			switch gf.SeqNum {
-			case TMHeartBeatPingSeq:
-				go t.sendHeartBeatResponse()
-			case TMHeartBeatPongSeq:
-				log.Info("TT: Received Heartbeat Pong")
+		if !gf.IsControl() {
+			// register the current worker into the worker queue.
+			//log.Debug("TT: Try to register into the write worker queue")
+			t.writePool <- t.writeChannel
+			//log.Debug("TT: Registered into the write worker queue")
 
-			case TMCreateConnSeq:
-				log.Debug("TT: Received Create Connection Signal")
-				t.newCCIDChannel <- NewCCID(gf.clientID, gf.ConnID)
-			case TMCreateFastOpenConnSeq:
-				log.Debug("TT: Received Create Fast Open Connection Signal")
-				t.newCCIDChannel <- NewCCID(gf.clientID, gf.ConnID)
-			case TMCreateConnOKSeq:
-				// TODO optimize
-				log.Debug("TT: Received Create Connection OK Signal")
-				t.writePool <- t.writeChannel
-				t.writeChannel <- gf
-			case TMCreateConnErrorSeq:
-				log.Debug("TT: Received Create Connection Error Signal")
-				t.writePool <- t.writeChannel
-				t.writeChannel <- gf
-
-			case TMCloseTunnelSeq:
-				log.Info("TT: Received Close Tunnel Request, Stop Read!")
-				go t.sendCloseTunnelResponse()
+			select {
+			case t.writeChannel <- gf:
+				t.stats.AddReceivedBytes(uint64(gf.Length))
+			case <-t.quit:
 				return
-			case TMCloseTunnelOKSeq:
-				log.Info("TT: Received Close Tunnel Response, Stop Read!")
-				return
-
-			case TMCloseConnSeq:
-				log.Debug("TT: Received Close Connection Signal")
-				t.writePool <- t.writeChannel
-				t.writeChannel <- gf
-			case TMCloseConnForceSeq:
-				log.Debug("TT: Received Force Close Connection Signal")
-				t.writePool <- t.writeChannel
-				t.writeChannel <- gf
 			}
 			continue
 		}
 
-		// register the current worker into the worker queue.
-		//log.Debug("TT: Try to register into the write worker queue")
-		t.writePool <- t.writeChannel
-		//log.Debug("TT: Registered into the write worker queue")
-
-		select {
-		case t.writeChannel <- gf:
-			t.stats.AddReceivedBytes(uint64(gf.Length))
-		case <-t.quit:
+		// handler Control Seq
+		switch gf.SeqNum {
+		case TMHeartBeatPingSeq:
+			go t.sendHeartBeatResponse()
+		case TMHeartBeatPongSeq:
+			log.Info("TT: Received Heartbeat Pong")
+		case TMCreateConnSeq:
+			log.Debug("TT: Received Create Connection Signal")
+			t.newCCIDChannel <- NewCCID(gf.clientID, gf.ConnID)
+		case TMCreateFastOpenConnSeq:
+			log.Debug("TT: Received Create Fast Open Connection Signal")
+			t.newCCIDChannel <- NewCCID(gf.clientID, gf.ConnID)
+		case TMCreateConnOKSeq:
+			// TODO optimize
+			log.Debug("TT: Received Create Connection OK Signal")
+			t.writePool <- t.writeChannel
+			t.writeChannel <- gf
+		case TMCreateConnErrorSeq:
+			log.Debug("TT: Received Create Connection Error Signal")
+			t.writePool <- t.writeChannel
+			t.writeChannel <- gf
+		case TMCloseTunnelSeq:
+			log.Info("TT: Received Close Tunnel Request, Stop Read!")
+			go t.sendCloseTunnelResponse()
 			return
+		case TMCloseTunnelOKSeq:
+			log.Info("TT: Received Close Tunnel Response, Stop Read!")
+			return
+		case TMCloseConnSeq:
+			log.Debug("TT: Received Close Connection Signal")
+			t.writePool <- t.writeChannel
+			t.writeChannel <- gf
+		case TMCloseConnForceSeq:
+			log.Debug("TT: Received Force Close Connection Signal")
+			t.writePool <- t.writeChannel
+			t.writeChannel <- gf
 		}
 	}
 }
@@ -808,7 +809,6 @@ Loop:
 				case <-t.readChannel:
 				case <-time.After(3 * time.Second):
 				}
-
 			}
 
 			// received a signal to stop
