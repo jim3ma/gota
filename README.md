@@ -47,9 +47,28 @@ auth:
   username: gota
   password: gota
 
+# white list for remote ip
+#whiteips:
+#  - 127.0.0.1/32
+
 # remote address with port for forwarding traffic
 # suppose you want to speed up you 8080 port
 remote: 127.0.0.1:8080
+
+# PS: try to enable fast open and pool for speed up connection time
+
+# fast open in server
+fastopen: true
+
+# connection pool in server
+pool:
+  enable: false
+  count: 10
+  # sometimes server will close some connections for long idle time,
+  # set keepalive to refresh connections which idle for the special time.
+  # unit: second
+  # 0: do not refresh connections
+  keepalive: 10
 
 # tunnel listen address with port
 tunnel:
@@ -80,10 +99,6 @@ auth:
   username: gota
   password: gota
 
-# white list for remote ip
-#whiteips:
-#  - 127.0.0.1/32
-
 # local listen address with port
 listen: 127.0.0.1:12363
 
@@ -91,11 +106,6 @@ listen: 127.0.0.1:12363
 
 # fast open in server
 fastopen: true
-
-# connection pool in server
-pool:
-  enable: true
-  count: 10
 
 # Gota server addresses with port
 tunnel:

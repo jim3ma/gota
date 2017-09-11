@@ -25,12 +25,13 @@ fastopen: true
 
 # connection pool in server
 pool:
-  enable: true
+  enable: false
   count: 10
   # sometimes server will close some connections for long idle time,
   # set keepalive to refresh connections which idle for the special time.
   # unit: second
-  keepalive: 60
+  # 0: do not refresh connections
+  keepalive: 10
 
 # tunnel listen address with port
 tunnel:

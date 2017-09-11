@@ -3,7 +3,7 @@ mode: client
 
 # log level: info debug warn error fatal panic
 log: debug
-verbose: true
+verbose: false
 
 # tunnel authenticate credential
 auth:
