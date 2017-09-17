@@ -416,6 +416,12 @@ func (cm *ConnManager) dispatch() {
 		}
 	}()
 
+	newCCIDDelayCount := make(map[CCID]struct {
+		sleepNanosecond time.Duration
+		delayCount      int
+	})
+	newCCIDMaxDelayCount := 100
+
 	for gf := range cm.readFromTunnelC {
 		Verbosef("CM: Received frame from tunnel: %s", gf)
 
@@ -439,6 +445,8 @@ func (cm *ConnManager) dispatch() {
 			case <-time.After(10 * time.Nanosecond):
 				log.Warnf("CM: Conn handler receive Gota Frame timeout: %s, delivery the Gota Frame async", gf)
 				go func(gf *GotaFrame, ch *ConnHandler) {
+					// TODO "send on closed channel" panic
+					defer Recover()
 					ch.ReadFromTunnelC <- gf
 				}(gf, ch)
 			}
@@ -448,6 +456,22 @@ func (cm *ConnManager) dispatch() {
 		// fast open feature
 		// TODO maybe a bug for multiple init seq num for fast open
 		if cm.fastOpen && !gf.IsControl() && gf.SeqNum == FastOpenInitSeqNum {
+			delay, ok := newCCIDDelayCount[NewCCID(gf.clientID, gf.ConnID)]
+			if !ok {
+				newCCIDDelayCount[NewCCID(gf.clientID, gf.ConnID)] = struct {
+					sleepNanosecond time.Duration
+					delayCount      int
+				}{
+					FastOpenDelayNanosecond,
+					1,
+				}
+				delay = newCCIDDelayCount[NewCCID(gf.clientID, gf.ConnID)]
+			}
+			if delay.delayCount >= newCCIDMaxDelayCount {
+				log.Warnf("CM: Max delay count reached for Gota Frame: %s", gf)
+				continue
+			}
+
 			if cm.mode == ActiveMode {
 				log.Warnf("CM: ActiveMode should not receive this frame, may be a bug, Gota Frame: %s", gf)
 				continue
@@ -459,6 +483,12 @@ func (cm *ConnManager) dispatch() {
 				time.Sleep(FastOpenDelayNanosecond * time.Nanosecond)
 				cm.readFromTunnelC <- gf
 			}(gf)
+
+			delay.delayCount += 1
+			if delay.sleepNanosecond*time.Nanosecond < 8*time.Second {
+				delay.sleepNanosecond *= 2
+			}
+			newCCIDDelayCount[NewCCID(gf.clientID, gf.ConnID)] = delay
 			continue
 		}
 

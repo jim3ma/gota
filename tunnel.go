@@ -499,8 +499,13 @@ func (tm *TunnelManager) cleanUpReadPool() {
 		tm.poolLock.Lock()
 		rp, ok := tm.readPool[cid]
 		if ok {
-			gf := &GotaFrame{}
-			<-rp <- gf
+			go func(rp chan chan *GotaFrame) {
+				gf := &GotaFrame{}
+				select {
+				case <-rp <- gf:
+				case <-time.After(30 * time.Second):
+				}
+			}(rp)
 			/*
 				Loop:
 					for {
